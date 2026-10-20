@@ -53,6 +53,7 @@ Deploy this project to the service. You can use either method.
 2. Drag and drop, or upload the ZIP file into the deployment area.
 3. Make sure the `Dockerfile` is at the **root** of the ZIP, not inside an extra folder.
 4. Start the deployment.
+<img width="1571" height="403" alt="image" src="https://github.com/user-attachments/assets/40523bf6-8a8e-4812-8559-21e93d7209cf" />
 
 ### Option B: Direct GitHub Link
 
@@ -75,7 +76,10 @@ Open the **Environment Variables (متغیرهای محیطی)** section in the 
 - **`ADMIN_PASSWORD`** *(Required)* — the password for the web panel. Use at least 8 characters; 16+ is better.
 - **`PROXY_USER`** — the SOCKS5 username, for example `steam`.
 - **`PROXY_PASS`** — the SOCKS5 password, 8–128 characters. Set it explicitly so it does **not** change when the container restarts.
-- **`PUBLIC_SOCKS_ENDPOINT`** — the NodePort address, for example `remote-pishgaman.runflare.com:30769`. Add this after step 6. Use `host:port` only, without `socks5://`.
+- **`PUBLIC_SOCKS_ENDPOINT`** — Add a placeholder value for now, we will Add this at step 6.
+
+<img width="1566" height="480" alt="image" src="https://github.com/user-attachments/assets/b1fc6648-0cba-4103-8323-530c560f9500" />
+
 
 Optional settings:
 
@@ -92,8 +96,6 @@ Save the variables. Runflare restarts the container automatically when they chan
 
 > Changes made in the panel are kept in memory. They reset to these environment values when the container restarts.
 
-![Environment variables](screenshots/environment_variables.png)
-
 ---
 
 ## 5. Create a Panel URL (Domain)
@@ -105,12 +107,16 @@ Runflare's ClusterIP row only maps `http:80 → 3000` inside the project. It doe
 3. The URL appears in that column, for example:
    `docker-xxxx-<project>.runflare.cloud`
 4. Open that URL. It routes to the panel on port `3000`.
+<img width="1568" height="663" alt="temp-domain" src="https://github.com/user-attachments/assets/fa4a02e7-d7e5-4791-91c6-a9ac7328ee66" />
+
 
 For a permanent URL, go to **Project → Domain Settings (تنظیم دامنه)**, add a domain you own, set its DNS record, then attach it to this service and choose the **`http:80 → 3000`** network.
 
 > A temporary domain is valid for **1 hour** and can be created **3 times per 24 hours**. It is meant for setup and testing. The relay itself keeps running after the URL expires; create a new temporary domain when you need the panel.
 
-![Create a temporary domain](screenshots/domain.png)
+
+
+
 
 ---
 
@@ -127,11 +133,19 @@ Runflare's default ClusterIP mapping is for the web panel. SOCKS5 is raw TCP, so
 7. Click **Add / Save**.
 8. Copy the value under **Remote Access (دسترسی از راه دور)**, for example:
    `remote-pishgaman.runflare.com:30769`
+<img width="1565" height="413" alt="network" src="https://github.com/user-attachments/assets/0d9c5474-e4d0-4ab6-b205-381c4475835e" />
+
+
 9. Put that `host:port` into **`PUBLIC_SOCKS_ENDPOINT`** and save/restart. The panel's **Copy** button will then work.
+
+
+<img width="660" height="496" alt="replace" src="https://github.com/user-attachments/assets/fc9cfa26-3c3a-40b5-a5ad-5092d8316b5c" />
+
 
 > Use the **5-digit remote port**, not `8000`. Do not use the panel domain for SOCKS. The panel domain is for the web UI only; the SOCKS proxy is the NodePort.
 
-![NodePort configuration](screenshots/networks.png)
+
+
 
 ---
 
@@ -143,83 +157,14 @@ Runflare's default ClusterIP mapping is for the web panel. SOCKS5 is raw TCP, so
 4. Under **Access**, click **Reveal current password**. Copy the username and password.
 5. The **Endpoint** box shows `socks5h://host:port` if `PUBLIC_SOCKS_ENDPOINT` is set. If it is not set, use the NodePort address manually.
 
-Quick test from PowerShell:
-
-```powershell
-curl.exe --proxy 'socks5h://USER:PASS@HOST:PORT' https://api.ipify.org
-```
-
-If the password contains characters like `@`, `:`, or `/`, use:
-
-```powershell
-curl.exe --proxy 'socks5h://HOST:PORT' --proxy-user USER --proxy-password 'PASS' https://api.ipify.org
-```
-
-The reply should be the container's public IP. `socks5h` makes the proxy resolve the hostname, which avoids DNS leaks.
-
-![Relay Control panel](screenshots/panel_dashboard.png)
 
 ---
 
-## 8. Connect Steam
+## 8. Connect to Proxy
 
-Steam has no SOCKS setting of its own, so use a TUN client. Pick one of the options below.
+### Option A: v2rayN (GUI)
 
-### Option A: sing-box (included config, recommended)
-
-1. Download sing-box for Windows from the [official releases](https://github.com/SagerNet/sing-box/releases). The included config is validated against [sing-box 1.14.3 for Windows amd64](https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-windows-amd64.zip).
-2. Extract it. Put `sing-box.exe` in `client\sing-box\`, or note the full path to the executable.
-3. Copy the example config:
-
-   ```powershell
-   Copy-Item client\sing-box.example.json client\sing-box.json
-   ```
-
-4. Edit `client\sing-box.json`:
-   - `server`: the NodePort host, for example `remote-pishgaman.runflare.com`
-   - `server_port`: the 5-digit port as a number, for example `30769`
-   - `username`: the panel username
-   - `password`: the panel password
-5. Run it from an **Administrator** PowerShell:
-
-   ```powershell
-   cd C:\Users\Trick\Desktop\Docker-VPN
-   .\client\sing-box\sing-box.exe run -c .\client\sing-box.json
-   ```
-
-6. Fully exit Steam if it is running, then start it again.
-7. Start a game download and watch the panel's **Active connections** and **Traffic**.
-
-The config routes only `steam.exe` and `steamwebhelper.exe` through the relay. DNS and everything else stay direct.
-
-![sing-box setup](screenshots/sing-box.png)
-
-### Option B: v2rayN (GUI)
-
-If you already use v2rayN, add the relay as a SOCKS server:
-
-1. Open v2rayN.
-2. Go to **Servers → Add [SOCKS]**.
-3. Fill in:
-   - **Address:** the NodePort host
-   - **Port:** the 5-digit remote port
-   - **Username:** the panel username
-   - **Password:** the panel password
-   - **Remarks:** `Steam Relay`
-4. Save the server and select it in the server list.
-5. Click **Enable Tun** (run v2rayN as Administrator if prompted).
-6. Open **Routing Setting** and create a rule set for Steam:
-   - Under **Pre-defined Rule Set List**, click **Add** and name it `Steam only`.
-   - Under **Rule Settings**, add Rule 1: **Process (Linux/Windows)** = `steam.exe,steamwebhelper.exe`, **Outbound Tag** = `proxy`.
-   - Add Rule 2: **Port** = `0-65535`, **Outbound Tag** = `direct` (final catch-all).
-   - Set `Steam only` as the active routing rule.
-7. Start Steam **after** TUN mode is active.
-
-> v2rayN expects `socks://` or `socks5://` links, not `socks5h://`. Importing the panel's `socks5h://` link directly will fail; enter the host and port manually, or change the scheme to `socks5://` and fill in the username/password after importing.
-
-> v2rayN's TUN mode captures all system traffic. The routing rules decide what is proxied. Without the Steam-only rule and a final direct rule, everything can go through the relay.
-
-![v2rayN setup](screenshots/v2rayn.png)
+---
 
 ### Confirm it is working
 
