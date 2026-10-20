@@ -1,0 +1,46 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": ["172.19.0.1/30"],
+      "mtu": 1400,
+      "auto_route": true,
+      "strict_route": false,
+      "stack": "system"
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "socks",
+      "tag": "relay",
+      "server": "REMOTE_HOST",
+      "server_port": 30769,
+      "version": "5",
+      "username": "relay",
+      "password": "CHANGE_ME"
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "port": 53,
+        "outbound": "direct"
+      },
+      {
+        "process_name": ["steam.exe", "steamwebhelper.exe"],
+        "outbound": "relay"
+      }
+    ],
+    "final": "direct",
+    "auto_detect_interface": true
+  }
+}

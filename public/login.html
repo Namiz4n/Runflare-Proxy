@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Sign in · Relay Control</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="login-body">
+  <main class="login">
+    <h1>Relay Control</h1>
+    <p class="login-lede">Sign in to manage the SOCKS5 endpoint, credentials, and traffic.</p>
+    <form method="post" action="/login" class="login-form">
+      <label>Admin password
+        <input id="admin-password" name="password" type="password" autocomplete="current-password" required autofocus>
+      </label>
+      <button class="btn btn-primary" type="submit">Enter control panel</button>
+    </form>
+    <p class="error" id="error" role="alert" hidden></p>
+    <p class="fine">The password comes from the <code>ADMIN_PASSWORD</code> environment variable.</p>
+  </main>
+  <script src="/login.js"></script>
+</body>
+</html>

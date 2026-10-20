@@ -1,0 +1,6 @@
+.git
+node_modules
+screenshots
+*.png
+README.md
+client

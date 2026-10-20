@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Relay Control</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>Relay Control</a>
+      <div class="topbar-meta">
+        <span class="lamp" id="lamp" aria-hidden="true"></span>
+        <span id="top-status">Connecting</span>
+        <span class="sep" aria-hidden="true"></span>
+        <span id="uptime" class="mono">—</span>
+        <form method="post" action="/logout">
+          <button class="linkbtn" type="submit">Sign out</button>
+        </form>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <h1 id="hero-title">Checking relay…</h1>
+          <p class="hero-note" id="hero-note">Reading status from the container.</p>
+        </div>
+        <button id="toggle" class="btn" type="button" disabled>Pause relay</button>
+      </section>
+
+      <section class="endpoint" aria-labelledby="endpoint-label">
+        <div class="endpoint-copy">
+          <p class="label" id="endpoint-label">Endpoint</p>
+          <code id="endpoint">Not configured</code>
+        </div>
+        <button id="copy" class="btn btn-primary" type="button" disabled>Copy</button>
+      </section>
+
+      <div class="grid">
+        <section class="panel" aria-labelledby="traffic-heading">
+          <div class="panel-head">
+            <h2 id="traffic-heading">Traffic</h2>
+            <span class="hint" id="traffic-hint">session totals</span>
+          </div>
+          <div class="spark">
+            <svg id="spark" viewBox="0 0 240 48" preserveAspectRatio="none" role="img" aria-label="Recent download rate">
+              <polyline id="spark-line" points=""></polyline>
+            </svg>
+            <span class="spark-rate" id="spark-rate">idle</span>
+          </div>
+          <dl class="stats">
+            <div><dt>Downloaded</dt><dd id="down">—</dd></div>
+            <div><dt>Uploaded</dt><dd id="up">—</dd></div>
+            <div><dt>Active</dt><dd id="active">—</dd></div>
+            <div><dt>Sessions</dt><dd id="sessions">—</dd></div>
+          </dl>
+        </section>
+
+        <section class="panel" aria-labelledby="access-heading">
+          <div class="panel-head">
+            <h2 id="access-heading">Access</h2>
+            <span class="hint" id="cred-source">—</span>
+          </div>
+          <form id="cred-form" class="stack">
+            <label>Username
+              <input id="username" name="username" autocomplete="username" maxlength="64" required>
+            </label>
+            <label>New password
+              <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" placeholder="Leave blank to keep the current one">
+            </label>
+            <div class="row">
+              <button class="btn btn-primary" type="submit">Save credentials</button>
+              <button class="btn" type="button" id="generate">Generate</button>
+              <button class="btn" type="button" id="show-pass">Show</button>
+            </div>
+          </form>
+          <div class="reveal">
+            <button class="linkbtn" type="button" id="reveal">Reveal current password</button>
+            <code id="current-pass" hidden></code>
+          </div>
+          <p class="fine">Changes apply to new connections. They live in memory and reset to the environment values on redeploy.</p>
+        </section>
+      </div>
+
+      <section class="panel" aria-labelledby="speed-heading">
+        <div class="panel-head">
+          <h2 id="speed-heading">Route test</h2>
+          <span class="hint">download from this container</span>
+        </div>
+        <form id="speed-form" class="speed-row">
+          <input id="speed-url" type="url" spellcheck="false" aria-label="Test URL">
+          <button class="btn" type="submit" id="speed-run">Run test</button>
+        </form>
+        <p class="speed-result" id="speed-result">No test run yet. This measures the container’s connection, not the proxied route.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="connections-heading">
+        <div class="panel-head">
+          <h2 id="connections-heading">Active connections</h2>
+          <span class="hint" id="conn-count">0 active</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Client</th>
+                <th scope="col">Target</th>
+                <th scope="col">Age</th>
+                <th scope="col">Down</th>
+                <th scope="col">Up</th>
+                <th scope="col"><span class="sr">Close</span></th>
+              </tr>
+            </thead>
+            <tbody id="connections"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="conn-empty">No active connections.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="activity-heading">
+        <div class="panel-head">
+          <h2 id="activity-heading">Activity</h2>
+          <span class="hint">last events</span>
+        </div>
+        <ol class="log" id="log"></ol>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>Relay Control <span id="version" class="mono"></span></span>
+      <span>The endpoint is public. Treat the password like a key.</span>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
