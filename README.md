@@ -2,6 +2,8 @@
 
 This guide sets up a lightweight Docker SOCKS5 relay on Runflare with a password-protected web control panel. It sends only Steam's download traffic through the container, so you can use a better network path without routing your whole PC through a VPN. Everything else stays direct.
 
+> **Quick start:** [Download `relay-control.zip`](https://github.com/ThisIsDara/Runflare-Proxy/releases/latest/download/relay-control.zip) and follow the steps below.
+
 The container has two listeners:
 
 | Container port | What it is | How it is exposed |
@@ -47,7 +49,7 @@ Deploy this project to the service. You can use either method.
 
 ### Option A: ZIP Upload (Recommended)
 
-1. Download `relay-control.zip` from this project, or download the repository as a ZIP.
+1. Download [`relay-control.zip`](https://github.com/ThisIsDara/Runflare-Proxy/releases/latest/download/relay-control.zip), or download the repository as a ZIP.
 2. Drag and drop, or upload the ZIP file into the deployment area.
 3. Make sure the `Dockerfile` is at the **root** of the ZIP, not inside an extra folder.
 4. Start the deployment.
@@ -301,7 +303,3 @@ docker run --rm -p 3000:3000 -p 8000:8000 `
 ```
 
 The Dockerfile uses `node:22-alpine` and does not run `npm install`.
-
----
-
-> The images in `screenshots/` are placeholders. Replace them with your own screenshots using the same filenames.
