@@ -36,7 +36,8 @@ First, set up the project that will hold the relay service.
 5. **Select Resources:** The minimum is enough to start.
 6. Click to create the service.
 
-![Create the Docker service](screenshots/create_service.png)
+<img width="1319" height="779" alt="image" src="https://github.com/user-attachments/assets/55bdfe8b-5287-421b-acad-ad3e1a2b554e" />
+
 
 ---
 
