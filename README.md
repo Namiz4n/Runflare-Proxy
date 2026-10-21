@@ -14,6 +14,8 @@ The container has two listeners:
 
 > **Important:** `3000` is the panel and the 443 tunnel. `8000` is the direct SOCKS5 proxy. Do not swap them. The 443 tunnel does not add a new port; it reuses the panel's HTTPS domain and the `/ws` path.
 
+> **TLS requirement:** the 443 tunnel uses the panel domain's certificate. If the domain serves a self-signed or internal certificate, the panel may still open after a browser warning, but v2rayN will reject the tunnel. See [Enable HTTPS for the 443 Tunnel](#enable-https-for-the-443-tunnel).
+
 ---
 
 ## 1. Create a Runflare Project
@@ -143,9 +145,66 @@ Runflare's ClusterIP row only maps `http:80 → 3000` inside the project. It doe
 
 > *DNS propagation:* Runflare manages DNS queries itself. After creating or attaching the domain, the panel may not open immediately. Wait **5–30 minutes** for the DNS record to propagate before assuming the deployment is broken.
 
+### Enable HTTPS for the 443 Tunnel
 
+The 443 tunnel uses the panel domain's certificate. If the domain serves a self-signed or internal certificate, the panel may still load after a browser warning, but v2rayN rejects the tunnel and the real-delay test shows `-1`. The panel also keeps generating a `ws://` link while it is opened over HTTP.
 
+Open **SSL**, select the domain, and choose one of Runflare's three modes:
 
+| Mode | Result | Use it? |
+| --- | --- | --- |
+| **HTTP** | No TLS. The panel is plain HTTP and the tunnel link is `ws://`. | No, not for the 443 tunnel. |
+| **Runflare free certificate** | Runflare manages the certificate. | Try it first. Some domains receive an internal `cert-manager.local` certificate that clients reject. |
+| **HTTPS user certificate** | You upload a certificate and its private key. | Use this when the free certificate is not trusted. |
+
+#### Option A: Runflare free certificate
+
+1. Open **SSL**, select the domain.
+2. Enable **Runflare free certificate** and turn off the other two options.
+3. Click **Save** and wait a few minutes.
+4. Open `https://your-domain` in a private window. A valid padlock means the certificate is trusted.
+5. Reload the panel over HTTPS. The 443 card should show `:443` with `security=tls`.
+
+If the browser still warns, or the certificate details show `CN=cert-manager.local` or `CN=TRAEFIK DEFAULT CERT`, the free certificate is not usable for this domain. Use Option B.
+
+#### Option B: Upload a Let's Encrypt certificate
+
+Some CAs, including **ZeroSSL**, refuse `.ir` domains because of US sanctions. **Let's Encrypt** issues certificates for ordinary `.ir` domains, so use it when the panel domain ends in `.ir`.
+
+You need a certificate whose SAN covers the panel domain, its private key, and the intermediate chain. The certificate must cover the exact hostname used in the 443 link; if you use the apex domain, do not switch to `www` unless the certificate includes it. Any ACME client can produce them. For example, with `acme.sh` and Cloudflare DNS:
+
+```bash
+export CF_Token="your-cloudflare-api-token"
+acme.sh --issue --server letsencrypt --dns dns_cf -d panel.example.com --keylength 2048
+```
+
+For other DNS providers, use the matching `--dns` hook and credentials. The client prints a TXT record. Add it at your DNS provider:
+
+- **Type:** `TXT`
+- **Name:** `_acme-challenge` (the provider appends the zone)
+- **Value:** the value printed by the client
+
+Finish the validation, then remove the TXT record (it is only needed during issuance). Collect:
+
+| File | `acme.sh` name | What it is |
+| --- | --- | --- |
+| `private.key` | `<domain>.key` | The private key |
+| `certificate.crt` | `<domain>.cer` | The leaf certificate |
+| `ca_bundle.crt` | `ca.cer` | The intermediate chain (recommended) |
+
+Upload them in Runflare:
+
+1. **SSL → select the domain → HTTPS user certificate**.
+2. Paste the private key, certificate, and bundle into the matching boxes.
+3. Turn off **Runflare free certificate**; only the user certificate should be active.
+4. Click **Save** and wait 1–2 minutes.
+5. Open `https://your-domain` and check the certificate details. It should be issued to your domain by Let's Encrypt (or your CA), not `TRAEFIK DEFAULT CERT`.
+
+> **Renewal:** Let's Encrypt certificates are valid for 90 days. Renew about 30 days before expiry and upload the new files. The TXT value changes on every renewal. Let's Encrypt allows 50 certificates per domain per 7 days, so normal renewals are well within the limit.
+
+> **Runflare caveat:** A custom certificate can work and then revert to `CN=TRAEFIK DEFAULT CERT` after the ingress restarts. If the tunnel stops working, open the SSL page, confirm only the user certificate is selected, paste the files again, and save. If it keeps reverting, open a Runflare ticket. The SOCKS5 NodePort is not affected.
+
+> **Checking the certificate:** click the padlock in the browser and open the certificate details. The subject should be your panel domain, and the issuer should be a public CA such as Let's Encrypt. `TRAEFIK DEFAULT CERT` or `cert-manager.local` means the domain is not using a trusted certificate.
 
 ---
 
@@ -180,14 +239,14 @@ Runflare's default ClusterIP mapping is for the web panel. SOCKS5 is raw TCP, so
 
 ## 7. Open the Panel and Copy a Share Link
 
-1. Open the panel URL from step 5.
+1. Open the panel over **HTTPS**: `https://your-domain` (not `http://`, and not the NodePort). The padlock must be valid; if it is not, see [Enable HTTPS for the 443 Tunnel](#enable-https-for-the-443-tunnel).
 2. Sign in with **`ADMIN_PASSWORD`**.
 3. Confirm that the panel says **Relay is live**.
 4. Under **Access**, click **Reveal current password** if you need the raw credentials for manual client setup.
 5. The **v2rayN share link** box shows `socks://...@host:port#runflare` when `PUBLIC_SOCKS_ENDPOINT` is set. Click **Copy** for the direct SOCKS5 path.
 6. The **v2rayN 443 tunnel** box shows a `vless://...@host:443...` link when the panel is open over HTTPS. Click **Copy** if your ISP throttles the SOCKS5 NodePort.
 
-> The 443 tunnel is **VLESS over WebSocket/TLS**, not SOCKS5. Import its link as a separate server in v2rayN. It uses the panel domain and the `/ws` path. If the card says `ws://` or the note warns that the panel is HTTP-only, attach a permanent HTTPS domain first; that link will not use port 443.
+> The 443 tunnel is **VLESS over WebSocket/TLS**, not SOCKS5. Import its link as a separate server in v2rayN. It uses the panel domain and the `/ws` path. If the card says `ws://`, the panel is being opened over HTTP; use `https://` and a permanent domain. If the link shows `:443` but v2rayN returns `-1` on the real-delay test, the domain's certificate is not trusted — see [Enable HTTPS for the 443 Tunnel](#enable-https-for-the-443-tunnel).
 
 ---
 
@@ -222,7 +281,7 @@ Import the link directly:
 
 ### How the 443 tunnel works
 
-The panel domain's HTTPS ingress forwards WebSocket upgrades to the container on port `3000`. The container speaks VLESS over WebSocket and relays TCP. Because the client connects to the domain on port `443` with TLS, the traffic uses the same port as normal HTTPS instead of the random NodePort. The SOCKS5 listener on `8000` remains unchanged.
+The panel domain's HTTPS ingress forwards WebSocket upgrades to the container on port `3000`. The container speaks VLESS over WebSocket and relays TCP. Because the client connects to the domain on port `443` with TLS, the traffic uses the same port as normal HTTPS instead of the random NodePort. The ingress terminates TLS, so the certificate must be valid for the panel domain; a self-signed certificate breaks the tunnel even if the panel itself loads after a warning. The SOCKS5 listener on `8000` remains unchanged.
 
 ### Confirm it is working
 
@@ -258,11 +317,21 @@ To avoid charges while you are not using the relay, stop the Runflare service.
 - **There is no panel URL, or Remote Access is empty.** ClusterIP is internal only. Create a temporary domain from the service list's **Domain** column, or attach your own domain in **Project → Domain Settings**. Make sure the domain points to `http:80 → 3000`, not the NodePort.
 - **The panel keeps returning to the sign-in page.** The domain is attached to the wrong network or the cookie is stale. Use the domain URL, not the NodePort, and confirm the ClusterIP target is `3000`.
 - **The temporary domain expired.** Create another one from the **Domain** column (3 per 24 hours). The SOCKS relay keeps working without the panel. The 443 tunnel stops with the domain; use a permanent HTTPS domain for it.
+- **The domain returns 503 "Application Starting", or the SOCKS port closes immediately.** The container is stopped or still booting. Start the service in Runflare and wait; the 503 page reloads itself. If it stays down, check the service logs.
 - **`curl` says the user was rejected.** The username or password is wrong. Use **Reveal current password** in the panel. Changes apply to new connections.
 - **`curl` cannot connect.** Confirm the NodePort is `Port 80 → Target 8000`, the service is running, and you are using the **Remote Access** `host:5-digit-port`, not port `8000`.
-- **The 443 tunnel link starts with `ws://`, or the panel says the domain is HTTP-only.** The tunnel needs HTTPS. Attach a permanent domain with TLS and open the panel over `https://`. A temporary Runflare domain may not provide TLS.
+- **The 443 tunnel link starts with `ws://`.** The tunnel needs HTTPS. Open the panel over `https://` with a permanent domain; a temporary Runflare domain may not provide TLS. If the site is HTTPS but the link is still `ws://`, the ingress is not sending `X-Forwarded-Proto: https`; set `PUBLIC_VLESS_ENDPOINT=https://your-domain:443` and redeploy.
 - **The 443 tunnel link contains an internal hostname, `localhost`, or the wrong port.** The ingress rewrote the `Host` header. Set `PUBLIC_VLESS_ENDPOINT=https://your-domain:443` explicitly and redeploy; the panel will use that value for the tunnel link.
-- **The 443 tunnel link does not connect.** Confirm the domain opens the panel over HTTPS, the ClusterIP target is `3000`, and the domain/ingress forwards WebSocket upgrades for `/ws`. The tunnel is VLESS, not SOCKS5; import the `vless://` link, not the `socks://` link. If the ingress cannot upgrade WebSocket, the tunnel cannot work on that service.
+- **The 443 tunnel link does not connect.** Confirm the domain opens the panel over HTTPS, the ClusterIP target is `3000`, and the domain/ingress forwards WebSocket upgrades for `/ws`. The tunnel is VLESS, not SOCKS5; import the `vless://` link, not the `socks://` link. If the ingress cannot upgrade WebSocket, the tunnel cannot work on that service. If the panel opens over HTTPS but v2rayN shows `-1`, check the certificate first.
+- **The browser says the panel is "Not secure", or v2rayN shows `-1` on the real-delay test.** The ingress is serving a certificate that clients do not trust. Open the certificate details; if the subject is `TRAEFIK DEFAULT CERT` or the issuer is `cert-manager.local`, the domain is not using a public certificate. Follow [Enable HTTPS for the 443 Tunnel](#enable-https-for-the-443-tunnel).
+- **The 443 tunnel worked for a few minutes and then stopped.** The ingress restarted and reverted to its default certificate. Re-save the user certificate in Runflare SSL, then reload the panel. If it keeps happening, contact Runflare support; the SOCKS5 NodePort keeps working.
+- **The panel works intermittently, or v2rayN sometimes shows `-1`.** If the domain has more than one A record, the ingress replicas can disagree about the certificate or the domain route. Test each IP:
+  ```bash
+  curl -I --resolve your-domain:443:INGRESS_IP https://your-domain
+  ```
+  A healthy IP returns the panel (usually `303` to `/login`) without a certificate error. If one IP returns `404`, a certificate error, or `TRAEFIK DEFAULT CERT`, remove that A record or ask Runflare to fix the ingress.
+- **ZeroSSL refuses the domain.** ZeroSSL blocks `.ir` and some other sanctioned ccTLDs. Use Let's Encrypt instead; it issues for ordinary `.ir` domains.
+- **The certificate expired.** Let's Encrypt certificates last 90 days. Renew about 30 days before expiry and upload the new files. The `_acme-challenge` TXT value changes on every renewal.
 - **The 443 tunnel is also slow.** If the direct SOCKS5 NodePort is throttled but the 443 tunnel is slow too, the limit is likely the Runflare ingress/plan or the upstream route, not the ISP's high-port shaping. Compare it with the Route test and contact Runflare support or upgrade.
 - **The 443 tunnel link changed after changing `ADMIN_PASSWORD`.** Set a fixed `VLESS_UUID` environment variable and redeploy. The link is derived from the admin password when `VLESS_UUID` is empty.
 - **Traffic is not going through the relay.** Confirm the client is using the NodePort `host:port` or the imported 443 tunnel, the relay is live, and the app or system proxy is actually pointed at it. In v2rayN, check that the active routing rule selects the imported server. If you use TUN mode, run v2rayN as Administrator and check **Active connections** in the panel.
@@ -276,7 +345,8 @@ To avoid charges while you are not using the relay, stop the Runflare service.
 
 - **No caching.** Every byte crosses the container twice: client → container, then container → destination. A 100 GB transfer moves roughly 200 GB through Runflare. Check Runflare's bandwidth quotas and pricing before large transfers.
 - **TCP only.** Both the SOCKS5 path and the 443 tunnel forward TCP. UDP-based traffic, including some voice, streaming, and QUIC flows, is not supported and may fail while routed.
-- **The 443 tunnel depends on the panel domain.** It uses the domain's HTTPS certificate and WebSocket support. A temporary domain expires after 1 hour; use a permanent domain for the tunnel. The SOCKS5 NodePort does not depend on the panel domain.
+- **The 443 tunnel depends on the panel domain and its certificate.** It uses the domain's HTTPS certificate and WebSocket support. A self-signed or internal certificate (`TRAEFIK DEFAULT CERT`, `cert-manager.local`) breaks the tunnel even if the panel loads after a warning. A temporary domain expires after 1 hour; use a permanent domain for the tunnel. The SOCKS5 NodePort does not depend on the panel domain.
+- **Certificates expire.** Let's Encrypt certificates last 90 days. Renew about 30 days before expiry and upload the new files. Runflare can revert a custom certificate after an ingress restart; re-save it if the tunnel stops.
 - **In-memory state.** Panel changes, counters, and active sessions reset when the container restarts.
 - **Security.** The SOCKS port is public but requires a username and password. The 443 tunnel is public but requires the VLESS UUID; treat the `vless://` link like a password. Use a strong `ADMIN_PASSWORD` and a fixed `VLESS_UUID`. The panel is protected by `ADMIN_PASSWORD`; use HTTPS for the domain. A temporary domain may be HTTP-only, so avoid entering the admin password on an untrusted network.
 - **Acceptable use.** A public general-purpose proxy may violate the host's terms. Check Runflare's policy before committing to large transfers.
