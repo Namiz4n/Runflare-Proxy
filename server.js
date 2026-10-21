@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const PROCESS_STARTED = Date.now();
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -22,7 +22,8 @@ const SESSION_TTL_MS = envInt('SESSION_HOURS', 12, 1, 24 * 30) * 60 * 60 * 1000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const PUBLIC_ENDPOINT = (process.env.PUBLIC_SOCKS_ENDPOINT || '')
   .trim()
-  .replace(/^socks5h?:\/\//i, '')
+  .replace(/^socks(?:5h?)?:\/\//i, '')
+  .replace(/#.*$/, '')
   .replace(/\/+$/, '');
 const SPEEDTEST_URL =
   process.env.SPEEDTEST_URL || 'https://speed.cloudflare.com/__down?bytes=100000000';
@@ -476,6 +477,12 @@ function recordLoginFailure(ip) {
   }
 }
 
+function buildShareLink() {
+  if (!PUBLIC_ENDPOINT) return '';
+  const userinfo = Buffer.from(`${state.user}:${state.pass}`, 'utf8').toString('base64url');
+  return `socks://${userinfo}@${PUBLIC_ENDPOINT}#runflare`;
+}
+
 function statusPayload() {
   return {
     version: VERSION,
@@ -564,16 +571,20 @@ function serveFile(res, name) {
       sendText(res, 404, 'Not found');
       return;
     }
+    const extension = path.extname(file);
     const types = {
       '.html': 'text/html; charset=utf-8',
       '.css': 'text/css; charset=utf-8',
       '.js': 'text/javascript; charset=utf-8',
       '.svg': 'image/svg+xml',
+      '.woff2': 'font/woff2',
+      '.woff': 'font/woff',
     };
+    const isFont = extension === '.woff2' || extension === '.woff';
     res.writeHead(200, {
-      'Content-Type': types[path.extname(file)] || 'application/octet-stream',
+      'Content-Type': types[extension] || 'application/octet-stream',
       'Content-Length': data.length,
-      'Cache-Control': 'no-store',
+      'Cache-Control': isFont ? 'public, max-age=31536000, immutable' : 'no-store',
     });
     res.end(data);
   });
@@ -768,7 +779,7 @@ async function handleRequest(req, res) {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'"
+    "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'; script-src 'self'; connect-src 'self'"
   );
 
   const url = new URL(req.url || '/', 'http://localhost');
@@ -825,6 +836,15 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (req.method === 'GET' && pathname.startsWith('/fonts/')) {
+    if (!/^\/fonts\/[A-Za-z0-9._-]+\.woff2$/.test(pathname)) {
+      sendText(res, 404, 'Not found');
+      return;
+    }
+    serveFile(res, pathname.slice(1));
+    return;
+  }
+
   if (pathname === '/' || pathname === '/index.html') {
     if (!sessionFor(req)) {
       redirect(res, '/login');
@@ -844,7 +864,7 @@ async function handleRequest(req, res) {
       return;
     }
     if (req.method === 'GET' && pathname === '/api/secret') {
-      json(res, 200, { user: state.user, pass: state.pass });
+      json(res, 200, { user: state.user, pass: state.pass, link: buildShareLink() });
       return;
     }
     if (req.method === 'POST' && pathname === '/api/state') {

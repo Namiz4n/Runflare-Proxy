@@ -15,7 +15,11 @@ let lastConnSignature = '';
 let lastLogSignature = '';
 let revealTimer = null;
 let toastTimer = null;
+let copyTimer = null;
 let speedBusy = false;
+let shareLink = '';
+let shareLinkLoaded = false;
+let shareLinkSeq = 0;
 
 async function api(path, options = {}) {
   const init = { credentials: 'same-origin', ...options };
@@ -74,42 +78,130 @@ function formatTime(timestamp) {
   return new Date(timestamp).toLocaleTimeString([], { hour12: false });
 }
 
-function toast(message) {
+function toast(message, tone = 'info') {
   const element = $('toast');
   element.textContent = message;
+  element.dataset.tone = tone;
   element.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => element.classList.remove('show'), 3600);
 }
 
-function drawSpark() {
-  const line = $('spark-line');
-  const width = 240;
-  const height = 48;
-
-  if (!rates.length) {
-    line.setAttribute('points', '');
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
     return;
   }
 
-  const max = Math.max(...rates, 1);
+  const area = document.createElement('textarea');
+  area.className = 'clipboard-helper';
+  area.value = text;
+  area.setAttribute('readonly', '');
+  document.body.appendChild(area);
+  area.select();
+  area.setSelectionRange(0, area.value.length);
+  const copied = document.execCommand('copy');
+  area.remove();
+  if (!copied) throw new Error('Copy failed');
+}
+
+function drawSpark() {
+  const line = $('spark-line');
+  const area = $('spark-area');
+  const spark = $('spark');
+  const width = 240;
+  const height = 64;
+  const baseline = height - 6;
+
+  const max = Math.max(...rates, 0);
+  if (!rates.length || max <= 0) {
+    const flat = `0,${baseline} ${width},${baseline}`;
+    spark.classList.add('is-empty');
+    line.setAttribute('points', flat);
+    area.setAttribute('points', flat);
+    return;
+  }
+
+  spark.classList.remove('is-empty');
   const step = rates.length > 1 ? width / (rates.length - 1) : width;
   const points = rates.map((rate, index) => {
     const x = index * step;
-    const y = height - 4 - (rate / max) * (height - 8);
+    const y = height - 6 - (rate / max) * (height - 14);
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
 
-  if (rates.length === 1) points.unshift(`0,${height - 4}`);
+  if (rates.length === 1) points.unshift(`0,${baseline}`);
   line.setAttribute('points', points.join(' '));
+  area.setAttribute('points', [`0,${baseline}`, ...points, `${width},${baseline}`].join(' '));
 }
 
 function setOffline() {
   $('top-status').textContent = 'Offline';
+  $('status-pill').dataset.state = 'offline';
   $('lamp').className = 'lamp offline';
+  $('hero-title').textContent = 'Relay is unreachable';
   $('hero-note').textContent = 'Cannot reach the container. Retrying every few seconds.';
+  $('route').classList.add('is-paused');
   $('toggle').disabled = true;
   $('speed-run').disabled = true;
+}
+
+function updateEndpoint(data = current) {
+  if (!data) return;
+
+  const endpoint = $('endpoint');
+  const copy = $('copy');
+  const note = $('endpoint-note');
+
+  if (!data.publicEndpoint) {
+    endpoint.textContent = 'Set PUBLIC_SOCKS_ENDPOINT to generate the share link';
+    endpoint.classList.add('is-placeholder');
+    copy.disabled = true;
+    note.textContent = 'Use the NodePort host:port, for example remote-pishgaman.runflare.com:30769.';
+    return;
+  }
+
+  if (!shareLinkLoaded) {
+    endpoint.textContent = 'Generating secure share link…';
+    endpoint.classList.add('is-placeholder');
+    copy.disabled = true;
+    note.textContent = 'The proxy credentials are embedded in the link.';
+    return;
+  }
+
+  if (!shareLink) {
+    endpoint.textContent = 'Share link unavailable';
+    endpoint.classList.add('is-placeholder');
+    copy.disabled = true;
+    note.textContent = 'Reload the panel or check the server logs.';
+    return;
+  }
+
+  endpoint.textContent = shareLink;
+  endpoint.classList.remove('is-placeholder');
+  copy.disabled = false;
+  note.textContent = 'Paste into v2rayN: Servers → Import Share Links from clipboard (Ctrl+V).';
+}
+
+async function loadShareLink() {
+  const sequence = ++shareLinkSeq;
+  shareLinkLoaded = false;
+  if (current) updateEndpoint(current);
+
+  try {
+    const secret = await api('/api/secret');
+    if (sequence !== shareLinkSeq) return;
+    shareLink = secret.link || '';
+  } catch (error) {
+    if (error.message === 'Signed out') return;
+    if (sequence !== shareLinkSeq) return;
+    shareLink = '';
+  } finally {
+    if (sequence === shareLinkSeq) {
+      shareLinkLoaded = true;
+      if (current) updateEndpoint(current);
+    }
+  }
 }
 
 function render(data) {
@@ -117,21 +209,22 @@ function render(data) {
   current = data;
   firstLoad = false;
 
-  $('hero-title').textContent = data.enabled ? 'Relay is live.' : 'Relay is paused.';
+  $('hero-title').textContent = data.enabled ? 'Relay is live' : 'Relay is paused';
   $('hero-note').textContent = data.enabled
-    ? `SOCKS5 on port ${data.listen.port}. Password required.`
-    : 'The listener is on, but it rejects every connection while paused.';
+    ? `SOCKS5 is listening on port ${data.listen.port}. Only Steam processes should use it.`
+    : 'The listener is still open, but it rejects every connection while paused.';
   $('top-status').textContent = data.enabled ? 'Live' : 'Paused';
+  $('status-pill').dataset.state = data.enabled ? 'live' : 'paused';
   $('lamp').className = `lamp ${data.enabled ? 'live' : 'paused'}`;
+  $('route').classList.toggle('is-paused', !data.enabled);
   $('uptime').textContent = formatDuration(data.uptimeSec);
+  setText('hero-port', `Port ${data.listen.port}`);
 
   $('toggle').disabled = false;
-  $('toggle').textContent = data.enabled ? 'Pause relay' : 'Resume relay';
+  $('toggle').classList.toggle('is-paused', !data.enabled);
+  $('toggle-label').textContent = data.enabled ? 'Pause relay' : 'Resume relay';
 
-  const endpoint = data.publicEndpoint ? `socks5h://${data.publicEndpoint}` : '';
-  $('endpoint').textContent =
-    endpoint || 'Set PUBLIC_SOCKS_ENDPOINT to show the public address';
-  $('copy').disabled = !endpoint;
+  updateEndpoint(data);
 
   $('down').textContent = formatBytes(data.traffic.down);
   $('up').textContent = formatBytes(data.traffic.up);
@@ -141,7 +234,13 @@ function render(data) {
     ? `${data.traffic.rejected} rejected`
     : 'session totals';
 
+  const maxConnections = data.limits.maxConnections || 1;
+  $('limit').textContent = `${data.active} / ${maxConnections}`;
+  $('limit-bar').max = maxConnections;
+  $('limit-bar').value = data.active;
+
   const now = Date.now();
+  if (lastDown === null) drawSpark();
   if (lastDown !== null && lastSampleAt !== null && now > lastSampleAt) {
     const rate = Math.max(0, data.traffic.down - lastDown) / ((now - lastSampleAt) / 1000);
     rates.push(rate);
@@ -281,19 +380,26 @@ $('toggle').addEventListener('click', async () => {
     render(data);
     toast(data.enabled ? 'Relay resumed.' : 'Relay paused. Active connections were closed.');
   } catch (error) {
-    toast(error.message);
+    toast(error.message, 'error');
     button.disabled = false;
   }
 });
 
 $('copy').addEventListener('click', async () => {
-  if (!current || !current.publicEndpoint) return;
-  const value = `socks5h://${current.publicEndpoint}`;
+  if (!shareLink) return;
+  const button = $('copy');
   try {
-    await navigator.clipboard.writeText(value);
-    toast('Endpoint copied.');
+    await copyText(shareLink);
+    button.classList.add('is-copied');
+    $('copy-label').textContent = 'Copied';
+    clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => {
+      button.classList.remove('is-copied');
+      $('copy-label').textContent = 'Copy';
+    }, 1800);
+    toast('Share link copied. Paste it into v2rayN.');
   } catch {
-    toast('Copy failed. Select the endpoint and copy it manually.');
+    toast('Copy failed. Select the link and copy it manually.', 'error');
   }
 });
 
@@ -302,11 +408,11 @@ $('cred-form').addEventListener('submit', async (event) => {
   const user = $('username').value.trim();
   const pass = $('password').value;
   if (!user) {
-    toast('Enter a username.');
+    toast('Enter a username.', 'error');
     return;
   }
   if (pass && pass.length < 8) {
-    toast('Use at least 8 characters for the password.');
+    toast('Use at least 8 characters for the password.', 'error');
     return;
   }
 
@@ -324,9 +430,10 @@ $('cred-form').addEventListener('submit', async (event) => {
     $('reveal').textContent = 'Reveal current password';
     clearTimeout(revealTimer);
     render(data);
+    await loadShareLink();
     toast('Credentials saved. New connections will use them.');
   } catch (error) {
-    toast(error.message);
+    toast(error.message, 'error');
   } finally {
     if (button) button.disabled = false;
   }
@@ -368,6 +475,11 @@ $('reveal').addEventListener('click', async () => {
     code.textContent = secret.pass;
     code.hidden = false;
     $('reveal').textContent = 'Hide current password';
+    if (secret.link) {
+      shareLink = secret.link;
+      shareLinkLoaded = true;
+      updateEndpoint(current);
+    }
     clearTimeout(revealTimer);
     revealTimer = setTimeout(() => {
       code.hidden = true;
@@ -375,7 +487,7 @@ $('reveal').addEventListener('click', async () => {
       $('reveal').textContent = 'Reveal current password';
     }, 30000);
   } catch (error) {
-    toast(error.message);
+    toast(error.message, 'error');
   }
 });
 
@@ -383,7 +495,7 @@ $('speed-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const url = $('speed-url').value.trim();
   if (!url) {
-    toast('Enter a test URL.');
+    toast('Enter a test URL.', 'error');
     return;
   }
 
@@ -420,7 +532,7 @@ $('connections').addEventListener('click', async (event) => {
     toast('Connection closed.');
     refresh();
   } catch (error) {
-    toast(error.message);
+    toast(error.message, 'error');
     button.disabled = false;
   }
 });
@@ -429,4 +541,5 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) refresh();
 });
 
+loadShareLink();
 refresh();

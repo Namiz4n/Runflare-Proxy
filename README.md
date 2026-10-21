@@ -147,7 +147,7 @@ Runflare's default ClusterIP mapping is for the web panel. SOCKS5 is raw TCP, so
 <img width="1565" height="413" alt="network" src="https://github.com/user-attachments/assets/0d9c5474-e4d0-4ab6-b205-381c4475835e" />
 
 
-9. Put that `host:port` into **`PUBLIC_SOCKS_ENDPOINT`** and save/restart. The panel's **Copy** button will then work.
+9. Put that `host:port` into **`PUBLIC_SOCKS_ENDPOINT`** and save/restart. The panel's **v2rayN share link** will then be generated with the proxy credentials embedded.
 
 
 <img width="660" height="496" alt="replace" src="https://github.com/user-attachments/assets/fc9cfa26-3c3a-40b5-a5ad-5092d8316b5c" />
@@ -160,20 +160,36 @@ Runflare's default ClusterIP mapping is for the web panel. SOCKS5 is raw TCP, so
 
 ---
 
-## 7. Open the Panel and Copy Credentials
+## 7. Open the Panel and Copy the Share Link
 
 1. Open the panel URL from step 5.
 2. Sign in with **`ADMIN_PASSWORD`**.
 3. Confirm that the panel says **Relay is live**.
-4. Under **Access**, click **Reveal current password**. Copy the username and password.
-5. The **Endpoint** box shows `socks5h://host:port` if `PUBLIC_SOCKS_ENDPOINT` is set. If it is not set, use the NodePort address manually.
-
+4. Under **Access**, click **Reveal current password** if you need the raw credentials for manual client setup.
+5. The **v2rayN share link** box shows `socks://...@host:port#runflare` when `PUBLIC_SOCKS_ENDPOINT` is set. Click **Copy**; paste it into v2rayN with `Ctrl+V`.
 
 ---
 
 ## 8. Connect to Proxy
 
 ### Option A: v2rayN (GUI)
+
+The panel's **v2rayN share link** already contains the host, port, username, and password. Import it directly:
+
+1. Open the panel and click **Copy** next to the **v2rayN share link**.
+2. In v2rayN, choose **Servers → Import Share Links from Clipboard** (`Ctrl+V`).
+3. Select the imported `runflare` server in the server list.
+4. Click **Enable Tun** (run v2rayN as Administrator if prompted).
+5. Open **Routing Setting** and create a rule set for Steam:
+   - Under **Pre-defined Rule Set List**, click **Add** and name it `Steam only`.
+   - Under **Rule Settings**, add Rule 1: **Process (Linux/Windows)** = `steam.exe,steamwebhelper.exe`, **Outbound Tag** = `proxy`.
+   - Add Rule 2: **Port** = `0-65535`, **Outbound Tag** = `direct` (final catch-all).
+   - Set `Steam only` as the active routing rule.
+6. Start Steam **after** TUN mode is active.
+
+> The share link is a password. Anyone who has it can use the relay. If you prefer manual entry, use **Servers → Add [SOCKS]** and fill in the host, 5-digit port, username, and password from the panel.
+
+> v2rayN's TUN mode captures all system traffic. The routing rules decide what is proxied. Without the Steam-only rule and a final direct rule, everything can go through the relay.
 
 ---
 

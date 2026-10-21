@@ -4,22 +4,64 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#07101c">
   <title>Sign in · Relay Control</title>
+  <link rel="preload" href="/fonts/jetbrains-mono-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body class="login-body">
-  <main class="login">
-    <h1>Relay Control</h1>
-    <p class="login-lede">Sign in to manage the SOCKS5 endpoint, credentials, and traffic.</p>
-    <form method="post" action="/login" class="login-form">
-      <label>Admin password
-        <input id="admin-password" name="password" type="password" autocomplete="current-password" required autofocus>
-      </label>
-      <button class="btn btn-primary" type="submit">Enter control panel</button>
-    </form>
-    <p class="error" id="error" role="alert" hidden></p>
-    <p class="fine">The password comes from the <code>ADMIN_PASSWORD</code> environment variable.</p>
+  <div class="ambient" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="ambient-grid"></span>
+  </div>
+
+  <main class="login-shell">
+    <section class="login-intro">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span class="brand-name">relay<span>control</span></span>
+      </a>
+      <p class="eyebrow"><span class="eyebrow-line"></span>Private edge relay</p>
+      <h1>Steam traffic,<br><span>on a better route.</span></h1>
+      <p class="login-lede">Sign in to manage the SOCKS5 endpoint, credentials, and traffic. Only Steam processes use the relay; everything else stays direct.</p>
+      <div class="route login-route" role="img" aria-label="Traffic path from your PC through the Runflare edge to Steam">
+        <div class="route-node">
+          <span class="route-dot"></span>
+          <span>Your PC</span>
+        </div>
+        <div class="route-track"><span class="route-packet"></span></div>
+        <div class="route-node route-node-active">
+          <span class="route-dot"></span>
+          <span>Runflare edge</span>
+        </div>
+        <div class="route-track"><span class="route-packet route-packet-2"></span></div>
+        <div class="route-node">
+          <span class="route-dot"></span>
+          <span>Steam CDN</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="login-card">
+      <p class="login-label">Admin access</p>
+      <h2>Sign in</h2>
+      <form method="post" action="/login" class="login-form">
+        <label>Admin password
+          <input id="admin-password" name="password" type="password" autocomplete="current-password" required autofocus>
+        </label>
+        <button class="btn btn-primary btn-block" type="submit">
+          Enter control panel
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14m-6-6 6 6-6 6"></path>
+          </svg>
+        </button>
+      </form>
+      <p class="error" id="error" role="alert" hidden></p>
+      <p class="fine">Protected by the <code>ADMIN_PASSWORD</code> environment variable.</p>
+    </section>
   </main>
+
   <script src="/login.js"></script>
 </body>
 </html>
