@@ -624,7 +624,10 @@ class WebSocketConnection {
 
   sendClose(code, reason) {
     if (this.closed || this.closeSent) return;
-    const text = Buffer.from(String(reason || '').slice(0, 120), 'utf8');
+    const text = Buffer.from(
+      String(reason || '').replace(/[^\x20-\x7e]/g, '?').slice(0, 120),
+      'utf8'
+    );
     const payload = Buffer.allocUnsafe(2 + text.length);
     payload.writeUInt16BE(code, 0);
     text.copy(payload, 2);
