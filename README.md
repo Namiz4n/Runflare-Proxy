@@ -64,7 +64,7 @@ Deploy this project to the service. You can use either method.
 2. In Runflare, select **Git**.
 3. Choose **Classic GitHub (گیت هاب کلاسیک)**.
 4. Enter your repository URL, for example:
-   `https://github.com/YOUR_USERNAME/YOUR_REPO.git`
+   `https://github.com/ThisIsDara/Runflare-Proxy.git`
 5. Set the **Branch** to `main`.
 6. Leave the Token field completely blank.
 7. Select the last commit from the bottom of the page.
