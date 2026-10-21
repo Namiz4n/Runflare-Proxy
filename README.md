@@ -108,7 +108,7 @@ Runflare's ClusterIP row only maps `http:80 → 3000` inside the project. It doe
    `docker-xxxx-<project>.runflare.cloud`
 4. Open that URL. It routes to the panel on port `3000`.
 
-> **DNS propagation:** Runflare manages DNS queries itself. After creating or attaching the domain, the panel may not open immediately. Wait **5–30 minutes** for the DNS record to propagate before assuming the deployment is broken.
+> A temporary domain is valid for **1 hour** and can be created **3 times per 24 hours**. It is meant for setup and testing. The relay itself keeps running after the URL expires; create a new temporary domain when you need the panel.
 
 <img width="1568" height="663" alt="temp-domain" src="https://github.com/user-attachments/assets/fa4a02e7-d7e5-4791-91c6-a9ac7328ee66" />
 
@@ -125,8 +125,7 @@ Runflare's ClusterIP row only maps `http:80 → 3000` inside the project. It doe
 
 <img width="1609" height="261" alt="domain3" src="https://github.com/user-attachments/assets/e6db4a29-8631-4733-afc2-c279be0f8936" />
 
-
-> A temporary domain is valid for **1 hour** and can be created **3 times per 24 hours**. It is meant for setup and testing. The relay itself keeps running after the URL expires; create a new temporary domain when you need the panel.
+> *DNS propagation:* Runflare manages DNS queries itself. After creating or attaching the domain, the panel may not open immediately. Wait **5–30 minutes** for the DNS record to propagate before assuming the deployment is broken.
 
 
 
