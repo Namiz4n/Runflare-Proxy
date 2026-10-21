@@ -47,10 +47,10 @@
     <main>
       <section class="hero">
         <div class="hero-copy">
-          <div class="route" id="route" role="img" aria-label="Traffic path from your PC through the Runflare edge to Steam">
+          <div class="route" id="route" role="img" aria-label="Traffic path from your device through the Runflare edge to the destination">
             <div class="route-node">
               <span class="route-dot"></span>
-              <span>Your PC</span>
+              <span>Your device</span>
             </div>
             <div class="route-track"><span class="route-packet"></span></div>
             <div class="route-node route-node-active">
@@ -60,7 +60,7 @@
             <div class="route-track"><span class="route-packet route-packet-2"></span></div>
             <div class="route-node">
               <span class="route-dot"></span>
-              <span>Steam CDN</span>
+              <span>Destination</span>
             </div>
           </div>
 
@@ -70,7 +70,7 @@
           <div class="chips">
             <span class="chip"><span class="chip-dot"></span>SOCKS5</span>
             <span class="chip" id="hero-port">Port —</span>
-            <span class="chip">Steam only</span>
+            <span class="chip">TCP relay</span>
           </div>
         </div>
 
@@ -157,7 +157,7 @@
             <div class="meter-head"><span>connection slots</span><span id="limit">0 / 64</span></div>
             <progress id="limit-bar" class="meter-bar" max="64" value="0" aria-label="Active connection slots">0%</progress>
           </div>
-          <p class="panel-note">Only <code>steam.exe</code> and <code>steamwebhelper.exe</code> use this relay. DNS and all other traffic stay direct.</p>
+          <p class="panel-note">Point any SOCKS5-capable client at this endpoint. Only TCP traffic sent to the relay passes through it, and every connection requires authentication.</p>
         </section>
 
         <section class="panel panel-access" aria-labelledby="access-heading">

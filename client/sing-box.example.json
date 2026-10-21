@@ -34,13 +34,9 @@
       {
         "port": 53,
         "outbound": "direct"
-      },
-      {
-        "process_name": ["steam.exe", "steamwebhelper.exe"],
-        "outbound": "relay"
       }
     ],
-    "final": "direct",
+    "final": "relay",
     "auto_detect_interface": true
   }
 }

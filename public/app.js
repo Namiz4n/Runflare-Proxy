@@ -211,7 +211,7 @@ function render(data) {
 
   $('hero-title').textContent = data.enabled ? 'Relay is live' : 'Relay is paused';
   $('hero-note').textContent = data.enabled
-    ? `SOCKS5 is listening on port ${data.listen.port}. Only Steam processes should use it.`
+    ? `SOCKS5 is listening on port ${data.listen.port}. Point any SOCKS5-capable client at it.`
     : 'The listener is still open, but it rejects every connection while paused.';
   $('top-status').textContent = data.enabled ? 'Live' : 'Paused';
   $('status-pill').dataset.state = data.enabled ? 'live' : 'paused';

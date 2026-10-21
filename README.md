@@ -1,6 +1,6 @@
-# Steam SOCKS5 Relay with Web Panel on Runflare (Steam-only, no full VPN)
+# SOCKS5 Relay with Web Panel on Runflare
 
-This guide sets up a lightweight Docker SOCKS5 relay on Runflare with a password-protected web control panel. It sends only Steam's download traffic through the container, so you can use a better network path without routing your whole PC through a VPN. Everything else stays direct.
+This guide sets up a lightweight Docker SOCKS5 relay on Runflare with a password-protected web control panel. Use it as a private, authenticated proxy for any SOCKS5-capable client. The relay only forwards connections that your client sends to it.
 
 > **Quick start:** [Download `relay-control.zip`](https://github.com/ThisIsDara/Runflare-Proxy/releases/latest/download/relay-control.zip) and follow the steps below.
 
@@ -49,7 +49,7 @@ Deploy this project to the service. You can use either method.
 
 ### Option A: ZIP Upload (Recommended)
 
-1. Download [`relay-control.zip`](https://github.com/ThisIsDara/Runflare-Proxy/releases/latest/download/relay-control.zip), or download the repository as a ZIP.
+1. Download [`relay-control.zip`](https://github.com/ThisIsDara/Runflare-Proxy/releases/latest/download/relay-control.zip).
 2. Drag and drop, or upload the ZIP file into the deployment area.
 3. Make sure the `Dockerfile` is at the **root** of the ZIP, not inside an extra folder.
 4. Start the deployment.
@@ -74,7 +74,7 @@ Deploy this project to the service. You can use either method.
 Open the **Environment Variables (متغیرهای محیطی)** section in the service settings. Add these variables:
 
 - **`ADMIN_PASSWORD`** *(Required)* — the password for the web panel. Use at least 8 characters; 16+ is better.
-- **`PROXY_USER`** — the SOCKS5 username, for example `steam`.
+- **`PROXY_USER`** — the SOCKS5 username, for example `relay`.
 - **`PROXY_PASS`** — the SOCKS5 password, 8–128 characters. Set it explicitly so it does **not** change when the container restarts.
 - **`PUBLIC_SOCKS_ENDPOINT`** — Add a placeholder value for now, we will Add this at step 6.
 
@@ -179,7 +179,7 @@ Runflare's default ClusterIP mapping is for the web panel. SOCKS5 is raw TCP, so
 
 ---
 
-## 8. Connect to Proxy
+## 8. Connect Through the Proxy
 
 ### Option A: v2rayN (GUI)
 
@@ -189,16 +189,11 @@ The panel's **v2rayN share link** already contains the host, port, username, and
 2. In v2rayN, choose **Servers → Import Share Links from Clipboard** (`Ctrl+V`).
 3. Select the imported `runflare` server in the server list.
 4. Click **Enable Tun** (run v2rayN as Administrator if prompted).
-5. Open **Routing Setting** and create a rule set for Steam:
-   - Under **Pre-defined Rule Set List**, click **Add** and name it `Steam only`.
-   - Under **Rule Settings**, add Rule 1: **Process (Linux/Windows)** = `steam.exe,steamwebhelper.exe`, **Outbound Tag** = `proxy`.
-   - Add Rule 2: **Port** = `0-65535`, **Outbound Tag** = `direct` (final catch-all).
-   - Set `Steam only` as the active routing rule.
-6. Start Steam **after** TUN mode is active.
+5. Open **Routing Setting** and add rules for the traffic you want to send through the relay. Set the outbound to the imported `runflare` server, and add a final catch-all `direct` rule for everything else.
 
 > The share link is a password. Anyone who has it can use the relay. If you prefer manual entry, use **Servers → Add [SOCKS]** and fill in the host, 5-digit port, username, and password from the panel.
 
-> v2rayN's TUN mode captures all system traffic. The routing rules decide what is proxied. Without the Steam-only rule and a final direct rule, everything can go through the relay.
+> v2rayN's TUN mode captures all system traffic. Configure the routing rules so only the traffic you want uses the relay.
 
 ---
 
@@ -206,27 +201,23 @@ The panel's **v2rayN share link** already contains the host, port, username, and
 
 Open the panel and check:
 
-- **Active connections** shows connections to Steam CDN hosts.
-- **Traffic → Downloaded** climbs while the game downloads.
-- Steam's download speed changes when you switch the relay on or off.
-
-If Steam still downloads directly, see the troubleshooting section below.
-
-![Steam download](screenshots/steam_download.png)
+- **Active connections** shows the destination hosts your client is opening.
+- **Traffic → Downloaded** climbs while data moves through the relay.
+- A request succeeds when the relay is live and fails when it is paused.
 
 ---
 
 ## 🛑 Stopping & Starting Your Service (Cost Saving)
 
-To avoid charges while you are not downloading, stop the Runflare service.
+To avoid charges while you are not using the relay, stop the Runflare service.
 
-### When you finish downloading
+### When you finish using the relay
 
 - Go to your **Runflare Dashboard**.
 - Open **Projects** and select your project.
 - Click the **Stop** button (⏻). The service stops billing while paused.
 
-### When you are ready to download again
+### When you need it again
 
 - Return to the same project.
 - Click the **Start** button (▷).
@@ -242,20 +233,20 @@ To avoid charges while you are not downloading, stop the Runflare service.
 - **The temporary domain expired.** Create another one from the **Domain** column (3 per 24 hours). The SOCKS relay keeps working without the panel.
 - **`curl` says the user was rejected.** The username or password is wrong. Use **Reveal current password** in the panel. Changes apply to new connections.
 - **`curl` cannot connect.** Confirm the NodePort is `Port 80 → Target 8000`, the service is running, and you are using the **Remote Access** `host:5-digit-port`, not port `8000`.
-- **Steam still downloads directly.** Run the client as Administrator, start Steam **after** the TUN client, and confirm the process names are `steam.exe` / `steamwebhelper.exe`. Check **Active connections** in the panel.
+- **Traffic is not going through the relay.** Confirm the client is using the NodePort `host:port`, the relay is live, and the app or system proxy is actually pointed at it. In v2rayN, check that the active routing rule selects the imported server. If you use TUN mode, run v2rayN as Administrator and check **Active connections** in the panel.
 - **The Route test shows 502 or HTTP 403.** Cloudflare is rejecting the container's test download. This is not the SOCKS proxy failing. Try `https://speed.hetzner.de/100MB.bin` in the Route test, or ignore it.
-- **The password contains URL characters.** Use curl's `--proxy-user USER --proxy-password PASS` instead of putting the password inside the proxy URL.
+- **The password contains URL characters.** Use curl's `--proxy-user "USER:PASS"` instead of putting the password inside the proxy URL. Quote the value in your shell.
 - **The NodePort changed after a redeploy.** Update `PUBLIC_SOCKS_ENDPOINT` and the client config with the new `host:port`.
 
 ---
 
 ## Limits & Notes
 
-- **No caching.** Every byte crosses the container twice: Steam → container, then container → you. A 100 GB game moves roughly 200 GB through Runflare. Check Runflare's bandwidth quotas and pricing before a large download.
-- **TCP only.** The relay implements SOCKS5 `CONNECT`, which covers Steam downloads. Steam voice and other UDP features may fail while routed.
+- **No caching.** Every byte crosses the container twice: client → container, then container → destination. A 100 GB transfer moves roughly 200 GB through Runflare. Check Runflare's bandwidth quotas and pricing before large transfers.
+- **TCP only.** The relay implements SOCKS5 `CONNECT`, which forwards TCP. UDP-based traffic, including some voice, streaming, and QUIC flows, is not supported and may fail while routed.
 - **In-memory state.** Panel changes, counters, and active sessions reset when the container restarts.
 - **Security.** The SOCKS port is public but requires a username and password. Use a strong password. The panel is protected by `ADMIN_PASSWORD`; use HTTPS for the domain when possible. A temporary domain may be HTTP-only, so avoid entering the admin password on an untrusted network.
-- **Acceptable use.** A general-purpose proxy or game-download relay may violate the host's terms. Check Runflare's policy before committing to large downloads.
+- **Acceptable use.** A public general-purpose proxy may violate the host's terms. Check Runflare's policy before committing to large transfers.
 
 ---
 
