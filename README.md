@@ -110,7 +110,18 @@ Runflare's ClusterIP row only maps `http:80 → 3000` inside the project. It doe
 <img width="1568" height="663" alt="temp-domain" src="https://github.com/user-attachments/assets/fa4a02e7-d7e5-4791-91c6-a9ac7328ee66" />
 
 
-For a permanent URL, go to **Project → Domain Settings (تنظیم دامنه)**, add a domain you own, set its DNS record, then attach it to this service and choose the **`http:80 → 3000`** network.
+### For a permanent URL, go to **Project → Domain Settings (تنظیم دامنه)**, add a domain you own, set its DNS record, then attach it to this service and choose the **`http:80 → 3000`** network.
+
+<img width="1558" height="403" alt="domain1" src="https://github.com/user-attachments/assets/b611af75-d280-4197-8b5d-3926a78eeadd" />
+
+### Copy the TXT Record
+<img width="1546" height="618" alt="domain2" src="https://github.com/user-attachments/assets/43ed0046-d3cf-4c2d-88f0-aef5dc64cffa" />
+
+
+### If you use CDNs like Cloudflare to manage your Domain, add the TXT Record to your Domain.
+
+<img width="1609" height="261" alt="domain3" src="https://github.com/user-attachments/assets/e6db4a29-8631-4733-afc2-c279be0f8936" />
+
 
 > A temporary domain is valid for **1 hour** and can be created **3 times per 24 hours**. It is meant for setup and testing. The relay itself keeps running after the URL expires; create a new temporary domain when you need the panel.
 
