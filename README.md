@@ -107,6 +107,9 @@ Runflare's ClusterIP row only maps `http:80 → 3000` inside the project. It doe
 3. The URL appears in that column, for example:
    `docker-xxxx-<project>.runflare.cloud`
 4. Open that URL. It routes to the panel on port `3000`.
+
+> **DNS propagation:** Runflare manages DNS queries itself. After creating or attaching the domain, the panel may not open immediately. Wait **5–30 minutes** for the DNS record to propagate before assuming the deployment is broken.
+
 <img width="1568" height="663" alt="temp-domain" src="https://github.com/user-attachments/assets/fa4a02e7-d7e5-4791-91c6-a9ac7328ee66" />
 
 
