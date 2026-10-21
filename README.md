@@ -169,7 +169,7 @@ Open **SSL**, select the domain, and choose one of Runflare's three modes:
 
 If the browser still warns, or the certificate details show `CN=cert-manager.local` or `CN=TRAEFIK DEFAULT CERT`, the free certificate is not usable for this domain. Use Option B.
 
-#### Option B: Upload a Let's Encrypt certificate
+#### Option B: Upload a Let's Encrypt certificate (Recommended)
 
 Some CAs, including **ZeroSSL**, refuse `.ir` domains because of US sanctions. **Let's Encrypt** issues certificates for ordinary `.ir` domains, so use it when the panel domain ends in `.ir`.
 
