@@ -70,6 +70,7 @@
           <div class="chips">
             <span class="chip"><span class="chip-dot"></span>SOCKS5</span>
             <span class="chip" id="hero-port">Port —</span>
+            <span class="chip"><span class="chip-dot chip-dot-data"></span>VLESS · 443</span>
             <span class="chip">TCP relay</span>
           </div>
         </div>
@@ -112,6 +113,23 @@
           </button>
         </div>
         <p class="endpoint-note" id="endpoint-note">Set PUBLIC_SOCKS_ENDPOINT to generate the link.</p>
+      </section>
+
+      <section class="endpoint-card endpoint-card-tunnel" aria-labelledby="vless-label">
+        <div class="endpoint-head">
+          <div>
+            <p class="label" id="vless-label"><span class="label-dot label-dot-data"></span>v2rayN 443 tunnel</p>
+            <p class="endpoint-sub">Use this when your ISP throttles the SOCKS5 NodePort. It runs over the panel's HTTPS domain.</p>
+          </div>
+          <span class="endpoint-badge">vless · 443</span>
+        </div>
+        <div class="endpoint-row">
+          <code id="vless-endpoint">Generating tunnel link…</code>
+          <button id="vless-copy" class="btn btn-copy" type="button" disabled>
+            <span id="vless-copy-label">Copy</span>
+          </button>
+        </div>
+        <p class="endpoint-note" id="vless-note">The tunnel uses WebSocket on the panel domain, not the NodePort.</p>
       </section>
 
       <div class="grid">
@@ -157,7 +175,7 @@
             <div class="meter-head"><span>connection slots</span><span id="limit">0 / 64</span></div>
             <progress id="limit-bar" class="meter-bar" max="64" value="0" aria-label="Active connection slots">0%</progress>
           </div>
-          <p class="panel-note">Point any SOCKS5-capable client at this endpoint. Only TCP traffic sent to the relay passes through it, and every connection requires authentication.</p>
+          <p class="panel-note">Point any SOCKS5-capable client at the NodePort endpoint, or import the 443 tunnel link above. Only TCP traffic sent to the relay passes through it, and every connection requires authentication.</p>
         </section>
 
         <section class="panel panel-access" aria-labelledby="access-heading">
@@ -250,6 +268,7 @@
               <thead>
                 <tr>
                   <th scope="col">Client</th>
+                  <th scope="col">Via</th>
                   <th scope="col">Target</th>
                   <th scope="col">Age</th>
                   <th scope="col">Down</th>
@@ -267,7 +286,7 @@
 
     <footer class="foot">
       <span>relay control <span id="version" class="mono"></span></span>
-      <span>The endpoint is public. Treat the password like a key.</span>
+      <span>The endpoints are public. Treat the password and tunnel link like keys.</span>
     </footer>
   </div>
 

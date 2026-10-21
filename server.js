@@ -6,9 +6,13 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const PROCESS_STARTED = Date.now();
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const VLESS_PATH = '/ws';
+const MAX_WS_FRAME = 8 * 1024 * 1024;
+const WS_PING_MS = 30_000;
+const WS_IDLE_MS = 90_000;
 
 function envInt(name, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
   const value = Number.parseInt(process.env[name] || '', 10);
@@ -20,6 +24,45 @@ const PROXY_PORT = envInt('PROXY_PORT', 8000, 1, 65535);
 const MAX_CONNECTIONS = envInt('MAX_CONNECTIONS', 64, 1, 512);
 const SESSION_TTL_MS = envInt('SESSION_HOURS', 12, 1, 24 * 30) * 60 * 60 * 1000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const PUBLIC_VLESS_ENDPOINT = (process.env.PUBLIC_VLESS_ENDPOINT || '').trim();
+
+function normalizeUuid(value) {
+  const uuid = String(value || '').trim().toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+    uuid
+  )
+    ? uuid
+    : '';
+}
+
+function deriveUuid(secret) {
+  const bytes = Buffer.from(
+    crypto.createHash('sha256').update(`runflare-vless:${secret}`).digest().subarray(0, 16)
+  );
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(
+    16,
+    20
+  )}-${hex.slice(20)}`;
+}
+
+function resolveVlessUuid() {
+  const configured = String(process.env.VLESS_UUID || '').trim();
+  if (configured) {
+    const normalized = normalizeUuid(configured);
+    if (!normalized) {
+      console.error('[fatal] VLESS_UUID must be a valid UUID.');
+      process.exit(1);
+    }
+    return normalized;
+  }
+  return deriveUuid(ADMIN_PASSWORD);
+}
+
+const VLESS_UUID = resolveVlessUuid();
+const VLESS_UUID_BYTES = Buffer.from(VLESS_UUID.replace(/-/g, ''), 'hex');
 const PUBLIC_ENDPOINT = (process.env.PUBLIC_SOCKS_ENDPOINT || '')
   .trim()
   .replace(/^socks(?:5h?)?:\/\//i, '')
@@ -137,6 +180,7 @@ class SocksSession {
       up: 0,
       down: 0,
       phase: 'handshake',
+      protocol: 'socks5',
     };
 
     state.connections.set(this.id, this.view);
@@ -387,6 +431,484 @@ class SocksSession {
   }
 }
 
+class WebSocketConnection {
+  constructor(socket, req) {
+    this.socket = socket;
+    this.req = req;
+    this.buffer = Buffer.alloc(0);
+    this.closed = false;
+    this.closing = false;
+    this.closeSent = false;
+    this.fragmented = false;
+    this.fragmentedText = false;
+    this.lastActivity = Date.now();
+    this.onData = null;
+    this.onClose = null;
+    this.onDrain = null;
+
+    socket.setNoDelay(true);
+    socket.setTimeout(0);
+    socket.on('data', (chunk) => this.feed(chunk));
+    socket.on('error', () => this.destroy());
+    socket.on('close', () => this.destroy());
+    socket.on('drain', () => {
+      if (this.onDrain) this.onDrain();
+    });
+
+    this.pingTimer = setInterval(() => {
+      if (this.closed) return;
+      if (Date.now() - this.lastActivity > WS_IDLE_MS) {
+        this.destroy();
+        return;
+      }
+      this.sendFrame(0x9, Buffer.from('rf'));
+    }, WS_PING_MS);
+    this.pingTimer.unref();
+  }
+
+  feed(chunk) {
+    if (this.closed) return;
+    this.lastActivity = Date.now();
+    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk;
+
+    while (!this.closed && !this.closing) {
+      if (this.buffer.length < 2) return;
+      const first = this.buffer[0];
+      const second = this.buffer[1];
+      const fin = (first & 0x80) !== 0;
+      const rsv = first & 0x70;
+      const opcode = first & 0x0f;
+      const masked = (second & 0x80) !== 0;
+      let length = second & 0x7f;
+      let offset = 2;
+
+      if (rsv !== 0) {
+        this.fail(1002, 'RSV bits are not supported');
+        return;
+      }
+      if (!masked) {
+        this.fail(1002, 'Client frames must be masked');
+        return;
+      }
+
+      if (length === 126) {
+        if (this.buffer.length < 4) return;
+        length = this.buffer.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (this.buffer.length < 10) return;
+        const high = this.buffer.readUInt32BE(2);
+        const low = this.buffer.readUInt32BE(6);
+        if (high !== 0 || low > MAX_WS_FRAME) {
+          this.fail(1009, 'Frame is too large');
+          return;
+        }
+        length = low;
+        offset = 10;
+      }
+
+      if (length > MAX_WS_FRAME) {
+        this.fail(1009, 'Frame is too large');
+        return;
+      }
+      if (this.buffer.length < offset + 4 + length) return;
+
+      const mask = this.buffer.subarray(offset, offset + 4);
+      offset += 4;
+      const payload = Buffer.allocUnsafe(length);
+      for (let index = 0; index < length; index += 1) {
+        payload[index] = this.buffer[offset + index] ^ mask[index & 3];
+      }
+      this.buffer = this.buffer.subarray(offset + length);
+      this.handleFrame(fin, opcode, payload);
+    }
+  }
+
+  handleFrame(fin, opcode, payload) {
+    if (opcode >= 0x8) {
+      if (!fin || payload.length > 125) {
+        this.fail(1002, 'Invalid control frame');
+        return;
+      }
+      if (opcode === 0x8) {
+        if (!this.closeSent) {
+          this.sendFrame(0x8, payload.length >= 2 ? payload.subarray(0, 2) : Buffer.alloc(0));
+          this.closeSent = true;
+        }
+        this.destroy();
+        return;
+      }
+      if (opcode === 0x9) {
+        this.sendFrame(0xa, payload);
+        return;
+      }
+      if (opcode === 0xa) return;
+      this.fail(1002, 'Unsupported control frame');
+      return;
+    }
+
+    if (opcode === 0x0) {
+      if (!this.fragmented) {
+        this.fail(1002, 'Unexpected continuation frame');
+        return;
+      }
+      if (!this.fragmentedText && this.onData && payload.length) this.onData(payload);
+      if (fin) {
+        this.fragmented = false;
+        this.fragmentedText = false;
+      }
+      return;
+    }
+
+    if (opcode === 0x1) {
+      if (this.fragmented) {
+        this.fail(1002, 'Nested fragmented message');
+        return;
+      }
+      if (fin) {
+        this.fail(1003, 'Text frames are not supported');
+        return;
+      }
+      this.fragmented = true;
+      this.fragmentedText = true;
+      return;
+    }
+
+    if (opcode === 0x2) {
+      if (this.fragmented) {
+        this.fail(1002, 'Nested fragmented message');
+        return;
+      }
+      if (payload.length && this.onData) this.onData(payload);
+      if (!fin) {
+        this.fragmented = true;
+        this.fragmentedText = false;
+      }
+      return;
+    }
+
+    this.fail(1002, 'Unsupported opcode');
+  }
+
+  sendFrame(opcode, payload) {
+    if (this.closed || this.closing || this.socket.destroyed) return false;
+    const length = payload.length;
+    let header;
+
+    if (length < 126) {
+      header = Buffer.allocUnsafe(2);
+      header[1] = length;
+    } else if (length < 65536) {
+      header = Buffer.allocUnsafe(4);
+      header[1] = 126;
+      header.writeUInt16BE(length, 2);
+    } else {
+      header = Buffer.allocUnsafe(10);
+      header[1] = 127;
+      header.writeUInt32BE(0, 2);
+      header.writeUInt32BE(length, 6);
+    }
+
+    header[0] = 0x80 | opcode;
+    try {
+      return this.socket.write(Buffer.concat([header, payload]));
+    } catch {
+      this.destroy();
+      return false;
+    }
+  }
+
+  sendBinary(payload) {
+    return this.sendFrame(0x2, payload);
+  }
+
+  sendClose(code, reason) {
+    if (this.closed || this.closeSent) return;
+    const text = Buffer.from(String(reason || '').slice(0, 120), 'utf8');
+    const payload = Buffer.allocUnsafe(2 + text.length);
+    payload.writeUInt16BE(code, 0);
+    text.copy(payload, 2);
+    this.sendFrame(0x8, payload);
+    this.closeSent = true;
+  }
+
+  endSoon() {
+    if (this.closed || this.closing) return;
+    this.closing = true;
+    this.socket.end();
+    setTimeout(() => this.destroy(), 1000).unref();
+  }
+
+  fail(code, reason) {
+    if (this.closed || this.closing) return;
+    this.sendClose(code, reason);
+    this.endSoon();
+  }
+
+  pause() {
+    if (!this.closed) this.socket.pause();
+  }
+
+  resume() {
+    if (!this.closed) this.socket.resume();
+  }
+
+  destroy() {
+    if (this.closed) return;
+    this.closed = true;
+    this.closing = true;
+    clearInterval(this.pingTimer);
+    this.socket.destroy();
+    if (this.onClose) this.onClose();
+  }
+}
+
+class VlessSession {
+  constructor(ws, req, head) {
+    this.id = crypto.randomBytes(5).toString('hex');
+    this.ws = ws;
+    this.req = req;
+    this.targetSocket = null;
+    this.target = '';
+    this.stage = 'header';
+    this.buffer = Buffer.alloc(0);
+    this.pending = null;
+    this.started = Date.now();
+    this.up = 0;
+    this.down = 0;
+    this.closed = false;
+    this.cleaned = false;
+
+    this.view = {
+      id: this.id,
+      client: clientIp(req),
+      target: '',
+      started: this.started,
+      up: 0,
+      down: 0,
+      phase: 'handshake',
+      protocol: 'vless',
+    };
+
+    state.connections.set(this.id, this.view);
+    state.activeSessions.set(this.id, this);
+    state.totals.sessions += 1;
+
+    ws.onData = (chunk) => this.feed(chunk);
+    ws.onClose = () => this.cleanup();
+    ws.onDrain = () => {
+      if (this.targetSocket && !this.targetSocket.destroyed) this.targetSocket.resume();
+    };
+
+    this.handshakeTimer = setTimeout(() => {
+      if (this.stage === 'header') this.fail('VLESS handshake timed out');
+    }, 15_000);
+    this.handshakeTimer.unref();
+
+    log('info', `vless session ${this.id} from ${this.view.client}`);
+
+    if (head && head.length) ws.feed(head);
+  }
+
+  feed(chunk) {
+    if (this.closed) return;
+    if (this.stage === 'open') {
+      this.writeTarget(chunk);
+      return;
+    }
+    if (this.buffer.length + chunk.length > MAX_WS_FRAME) {
+      this.fail('Handshake buffer too large', 1009);
+      return;
+    }
+    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk;
+    if (this.stage === 'header') this.parseHeader();
+  }
+
+  parseHeader() {
+    const buffer = this.buffer;
+    if (buffer.length < 18) return;
+
+    let offset = 0;
+    if (buffer[offset++] !== 0) {
+      this.fail('Unsupported VLESS version', 1002);
+      return;
+    }
+
+    const uuid = buffer.subarray(offset, offset + 16);
+    offset += 16;
+    if (!crypto.timingSafeEqual(uuid, VLESS_UUID_BYTES)) {
+      state.totals.rejected += 1;
+      this.fail('Authentication failed', 1008);
+      return;
+    }
+
+    const addonsLength = buffer[offset++];
+    if (buffer.length < offset + addonsLength + 1 + 2 + 1) return;
+    offset += addonsLength;
+
+    const command = buffer[offset++];
+    const port = buffer.readUInt16BE(offset);
+    offset += 2;
+    const addressType = buffer[offset++];
+
+    let host = '';
+    if (addressType === 0x01) {
+      if (buffer.length < offset + 4) return;
+      host = Array.from(buffer.subarray(offset, offset + 4)).join('.');
+      offset += 4;
+    } else if (addressType === 0x02) {
+      if (buffer.length < offset + 1) return;
+      const length = buffer[offset++];
+      if (buffer.length < offset + length) return;
+      host = buffer.subarray(offset, offset + length).toString('utf8');
+      offset += length;
+    } else if (addressType === 0x03) {
+      if (buffer.length < offset + 16) return;
+      const parts = [];
+      for (let index = 0; index < 16; index += 2) {
+        parts.push(buffer.readUInt16BE(offset + index).toString(16));
+      }
+      host = parts.join(':');
+      offset += 16;
+    } else {
+      this.fail('Unsupported address type', 1002);
+      return;
+    }
+
+    if (command !== 0x01) {
+      this.fail('Only TCP is supported', 1003);
+      return;
+    }
+    if (
+      !host ||
+      port === 0 ||
+      Buffer.byteLength(host, 'utf8') > 255 ||
+      /[\u0000-\u0020\u007f/\\]/.test(host)
+    ) {
+      this.fail('Invalid target', 1002);
+      return;
+    }
+
+    clearTimeout(this.handshakeTimer);
+    this.buffer = buffer.subarray(offset);
+    this.pending = this.buffer.length ? this.buffer : null;
+    this.buffer = Buffer.alloc(0);
+    this.target = `${host.slice(0, 255)}:${port}`;
+    this.view.target = this.target;
+    this.view.phase = 'connecting';
+    this.stage = 'connecting';
+    this.connectTarget(host, port);
+  }
+
+  connectTarget(host, port) {
+    let target;
+    try {
+      target = net.connect({ host, port });
+    } catch (error) {
+      this.fail(`Target error: ${error.code || error.message}`, 1011);
+      return;
+    }
+
+    this.targetSocket = target;
+    target.setNoDelay(true);
+
+    const connectTimer = setTimeout(() => {
+      target.destroy();
+      if (this.stage === 'connecting') this.fail('Target connection timed out', 1011);
+    }, 20_000);
+
+    target.on('error', (error) => {
+      clearTimeout(connectTimer);
+      if (this.stage === 'connecting') {
+        this.fail(`Target error: ${error.code || error.message}`, 1011);
+      } else {
+        this.destroy(`target error: ${error.code || error.message}`);
+      }
+    });
+
+    target.once('close', () => {
+      clearTimeout(connectTimer);
+      this.destroy(null);
+    });
+
+    target.once('connect', () => {
+      clearTimeout(connectTimer);
+      if (this.closed || this.ws.closed) {
+        target.destroy();
+        return;
+      }
+
+      const early = Buffer.concat([this.pending || Buffer.alloc(0), this.buffer]);
+      this.pending = null;
+      this.buffer = Buffer.alloc(0);
+      this.stage = 'open';
+      this.view.phase = 'open';
+      this.ws.sendBinary(Buffer.from([0, 0]));
+
+      target.on('data', (chunk) => {
+        this.down += chunk.length;
+        state.totals.down += chunk.length;
+        this.view.down = this.down;
+        if (!this.ws.sendBinary(chunk)) target.pause();
+      });
+      target.on('drain', () => this.ws.resume());
+      target.on('end', () => {
+        this.ws.sendClose(1000, 'Target closed');
+        this.destroy(null);
+      });
+
+      if (early.length) this.writeTarget(early);
+      log('info', `vless session ${this.id} open ${this.target}`);
+    });
+  }
+
+  writeTarget(chunk) {
+    if (!this.targetSocket || this.targetSocket.destroyed) return;
+    this.up += chunk.length;
+    state.totals.up += chunk.length;
+    this.view.up = this.up;
+    if (!this.targetSocket.write(chunk)) this.ws.pause();
+  }
+
+  fail(reason, code = 1002) {
+    if (this.closed) return;
+    this.view.phase = 'failed';
+    log('warn', `vless session ${this.id} rejected: ${reason}`);
+    clearTimeout(this.handshakeTimer);
+    this.ws.sendClose(code, reason);
+    this.ws.endSoon();
+    this.closed = true;
+    if (this.targetSocket) this.targetSocket.destroy();
+    this.cleanup();
+  }
+
+  destroy(reason) {
+    if (this.closed) return;
+    this.closed = true;
+    clearTimeout(this.handshakeTimer);
+    if (reason) log('info', `vless session ${this.id} closed: ${reason}`);
+    if (this.targetSocket) this.targetSocket.destroy();
+    if (this.ws) this.ws.destroy();
+    this.cleanup();
+  }
+
+  cleanup() {
+    if (this.cleaned) return;
+    this.cleaned = true;
+    this.closed = true;
+    clearTimeout(this.handshakeTimer);
+    state.connections.delete(this.id);
+    state.activeSessions.delete(this.id);
+    if (this.targetSocket && !this.targetSocket.destroyed) this.targetSocket.destroy();
+    if (this.view.phase === 'open') {
+      log(
+        'info',
+        `vless session ${this.id} ended ${this.target} (down ${this.down} B, up ${this.up} B)`
+      );
+    }
+  }
+}
+
 let socksServer = null;
 
 function startSocksListener() {
@@ -481,6 +1003,76 @@ function buildShareLink() {
   if (!PUBLIC_ENDPOINT) return '';
   const userinfo = Buffer.from(`${state.user}:${state.pass}`, 'utf8').toString('base64url');
   return `socks://${userinfo}@${PUBLIC_ENDPOINT}#runflare`;
+}
+
+function parsePublicEndpoint(value, fallbackSecure = true) {
+  let raw = String(value || '').trim();
+  if (!raw) return null;
+
+  let secure = fallbackSecure;
+  if (/^wss:\/\//i.test(raw) || /^https:\/\//i.test(raw)) {
+    secure = true;
+    raw = raw.replace(/^(wss|https):\/\//i, '');
+  } else if (/^ws:\/\//i.test(raw) || /^http:\/\//i.test(raw)) {
+    secure = false;
+    raw = raw.replace(/^(ws|http):\/\//i, '');
+  }
+
+  raw = raw.replace(/\/+$/, '');
+  const match = raw.match(/^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/);
+  if (!match) return null;
+
+  const host = match[1].replace(/^\[|\]$/g, '');
+  const port = match[2] ? Number(match[2]) : secure ? 443 : 80;
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+  if (port === 443) secure = true;
+  else if (port === 80) secure = false;
+
+  return { host, port, secure };
+}
+
+function requestTunnelEndpoint(req) {
+  const configured = parsePublicEndpoint(PUBLIC_VLESS_ENDPOINT, true);
+  if (configured) return configured;
+
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  const secure = forwardedProto ? forwardedProto === 'https' : Boolean(req.socket.encrypted);
+  const forwardedHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
+    .split(',')[0]
+    .trim();
+
+  return parsePublicEndpoint(forwardedHost, secure);
+}
+
+function buildVlessLink(req) {
+  const endpoint = requestTunnelEndpoint(req);
+  if (!endpoint) return null;
+
+  const linkHost = endpoint.host.includes(':') ? `[${endpoint.host}]` : endpoint.host;
+  const params = new URLSearchParams({
+    encryption: 'none',
+    security: endpoint.secure ? 'tls' : 'none',
+    type: 'ws',
+    host: linkHost,
+    path: VLESS_PATH,
+  });
+
+  if (endpoint.secure) {
+    params.set('sni', linkHost);
+    params.set('alpn', 'http/1.1');
+  }
+
+  return {
+    link: `vless://${VLESS_UUID}@${linkHost}:${endpoint.port}?${params.toString()}#runflare-443`,
+    host: endpoint.host,
+    port: endpoint.port,
+    secure: endpoint.secure,
+    path: VLESS_PATH,
+    uuid: VLESS_UUID,
+  };
 }
 
 function statusPayload() {
@@ -771,6 +1363,86 @@ async function handleKill(req, res) {
   json(res, 200, { ok: true });
 }
 
+function rejectUpgrade(socket, status, message) {
+  const reasons = {
+    400: 'Bad Request',
+    404: 'Not Found',
+    503: 'Service Unavailable',
+  };
+  const body = `${message}\n`;
+  try {
+    socket.write(
+      `HTTP/1.1 ${status} ${reasons[status] || 'Error'}\r\n` +
+        'Connection: close\r\n' +
+        'Content-Type: text/plain; charset=utf-8\r\n' +
+        `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+        '\r\n' +
+        body
+    );
+  } catch {
+    /* ignore */
+  }
+  socket.destroy();
+}
+
+function handleUpgrade(req, socket, head) {
+  socket.on('error', () => {});
+
+  let pathname = '';
+  try {
+    pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  } catch {
+    rejectUpgrade(socket, 400, 'Bad request');
+    return;
+  }
+
+  if (pathname !== VLESS_PATH) {
+    rejectUpgrade(socket, 404, 'Not found');
+    return;
+  }
+  if (!state.enabled) {
+    state.totals.rejected += 1;
+    rejectUpgrade(socket, 503, 'Relay is paused');
+    return;
+  }
+  if (state.connections.size >= state.maxConnections) {
+    state.totals.rejected += 1;
+    rejectUpgrade(socket, 503, 'Connection limit reached');
+    return;
+  }
+
+  const key = req.headers['sec-websocket-key'];
+  const upgrade = String(req.headers.upgrade || '').toLowerCase();
+  const version = String(req.headers['sec-websocket-version'] || '');
+  const keyBytes = key ? Buffer.from(String(key), 'base64') : Buffer.alloc(0);
+
+  if (req.method !== 'GET' || upgrade !== 'websocket' || version !== '13' || keyBytes.length !== 16) {
+    rejectUpgrade(socket, 400, 'Bad WebSocket request');
+    return;
+  }
+
+  const accept = crypto
+    .createHash('sha1')
+    .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+    .digest('base64');
+
+  try {
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+        'Upgrade: websocket\r\n' +
+        'Connection: Upgrade\r\n' +
+        `Sec-WebSocket-Accept: ${accept}\r\n` +
+        '\r\n'
+    );
+  } catch {
+    socket.destroy();
+    return;
+  }
+
+  const ws = new WebSocketConnection(socket, req);
+  new VlessSession(ws, req, head);
+}
+
 async function handleRequest(req, res) {
   req.on('error', () => {});
   res.on('error', () => {});
@@ -864,7 +1536,12 @@ async function handleRequest(req, res) {
       return;
     }
     if (req.method === 'GET' && pathname === '/api/secret') {
-      json(res, 200, { user: state.user, pass: state.pass, link: buildShareLink() });
+      json(res, 200, {
+        user: state.user,
+        pass: state.pass,
+        link: buildShareLink(),
+        vless: buildVlessLink(req),
+      });
       return;
     }
     if (req.method === 'POST' && pathname === '/api/state') {
@@ -911,6 +1588,8 @@ const adminServer = http.createServer((req, res) => {
     }
   });
 });
+
+adminServer.on('upgrade', handleUpgrade);
 
 setInterval(() => {
   const now = Date.now();

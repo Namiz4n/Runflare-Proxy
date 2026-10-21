@@ -1,6 +1,6 @@
-# SOCKS5 Relay with Web Panel on Runflare
+# SOCKS5 Relay with Web Panel and 443 Tunnel on Runflare
 
-This guide sets up a lightweight Docker SOCKS5 relay on Runflare with a password-protected web control panel. Use it as a private, authenticated proxy for any SOCKS5-capable client. The relay only forwards connections that your client sends to it.
+This guide sets up a lightweight Docker SOCKS5 relay on Runflare with a password-protected web control panel. It also includes an optional **VLESS-over-WebSocket tunnel on port 443** for networks that throttle the SOCKS5 NodePort. Use it as a private, authenticated proxy for any SOCKS5-capable client or v2rayN. The relay only forwards connections that your client sends to it.
 
 > **Quick start:** [Download `relay-control.zip`](https://github.com/ThisIsDara/Runflare-Proxy/releases/latest/download/relay-control.zip) and follow the steps below.
 
@@ -9,9 +9,10 @@ The container has two listeners:
 | Container port | What it is | How it is exposed |
 | --- | --- | --- |
 | `3000` | Web control panel | Runflare **ClusterIP** `http:80 → 3000`, opened through a domain |
+| `3000` + `/ws` | Optional VLESS 443 tunnel | The same panel domain over **HTTPS**, using a WebSocket upgrade |
 | `8000` | SOCKS5 proxy | Runflare **NodePort** `80 → 8000` |
 
-> **Important:** `3000` is the panel. `8000` is the proxy. Do not swap them.
+> **Important:** `3000` is the panel and the 443 tunnel. `8000` is the direct SOCKS5 proxy. Do not swap them. The 443 tunnel does not add a new port; it reuses the panel's HTTPS domain and the `/ws` path.
 
 ---
 
@@ -77,6 +78,8 @@ Open the **Environment Variables (متغیرهای محیطی)** section in the 
 - **`PROXY_USER`** — the SOCKS5 username, for example `relay`.
 - **`PROXY_PASS`** — the SOCKS5 password, 8–128 characters. Set it explicitly so it does **not** change when the container restarts.
 - **`PUBLIC_SOCKS_ENDPOINT`** — Add a placeholder value for now, we will Add this at step 6.
+- **`VLESS_UUID`** *(Optional)* — A fixed UUID for the 443 tunnel. If omitted, the server derives one from `ADMIN_PASSWORD`. Set it explicitly if you rotate the admin password or want the tunnel link to stay the same across password changes.
+- **`PUBLIC_VLESS_ENDPOINT`** *(Optional)* — The public `host:port` used in the 443 tunnel link. Use `https://host:443` to force TLS, or `ws://host:80` for an HTTP-only test. Leave it empty to use the panel's own domain and scheme.
 
 <img width="1566" height="480" alt="image" src="https://github.com/user-attachments/assets/b1fc6648-0cba-4103-8323-530c560f9500" />
 
@@ -85,14 +88,18 @@ Optional settings:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `MAX_CONNECTIONS` | `64` | Concurrent SOCKS connections, 1–512. |
+| `MAX_CONNECTIONS` | `64` | Concurrent SOCKS5 and VLESS connections, 1–512. |
 | `PROXY_ENABLED` | `true` | Start with the relay active or paused. |
 | `SPEEDTEST_URL` | Cloudflare 100 MB | Default Route test URL. Change it if the test returns 403. |
 | `ADMIN_PORT` | `3000` | Must match the service's Expose Port. |
 | `PROXY_PORT` | `8000` | Must match the NodePort target. |
+| `VLESS_UUID` | derived from ADMIN_PASSWORD | Fixed UUID for the 443 tunnel. |
+| `PUBLIC_VLESS_ENDPOINT` | panel domain | Public `host:port` for the 443 tunnel link. |
 | `TRUST_PROXY` | `true` | Keep this for Runflare so login rate limiting sees the real client IP. |
 
 Save the variables. Runflare restarts the container automatically when they change.
+
+> The 443 tunnel is active automatically. It only becomes useful when the panel is opened over **HTTPS**; the panel will generate a `ws://` link (not 443) when the domain is HTTP-only.
 
 > Changes made in the panel are kept in memory. They reset to these environment values when the container restarts.
 
@@ -109,6 +116,8 @@ Runflare's ClusterIP row only maps `http:80 → 3000` inside the project. It doe
 4. Open that URL. It routes to the panel on port `3000`.
 
 > A temporary domain is valid for **1 hour** and can be created **3 times per 24 hours**. It is meant for setup and testing. The relay itself keeps running after the URL expires; create a new temporary domain when you need the panel.
+
+> **For the 443 tunnel, use a permanent HTTPS domain.** The tunnel runs through the panel's domain, so it stops when a temporary domain expires. The SOCKS5 NodePort keeps working without the panel. If the panel opens over plain HTTP, the tunnel link will be `ws://` and will not use 443; attach a domain with TLS before relying on it. The domain's HTTP ingress must also forward WebSocket upgrades for `/ws`; most HTTP ingresses do, but test the tunnel after deployment.
 
 <img width="1568" height="663" alt="temp-domain" src="https://github.com/user-attachments/assets/fa4a02e7-d7e5-4791-91c6-a9ac7328ee66" />
 
@@ -162,20 +171,23 @@ Runflare's default ClusterIP mapping is for the web panel. SOCKS5 is raw TCP, so
 <img width="660" height="496" alt="replace" src="https://github.com/user-attachments/assets/fc9cfa26-3c3a-40b5-a5ad-5092d8316b5c" />
 
 
-> Use the **5-digit remote port**, not `8000`. Do not use the panel domain for SOCKS. The panel domain is for the web UI only; the SOCKS proxy is the NodePort.
+> Use the **5-digit remote port**, not `8000`, for SOCKS5. The panel domain is for the web UI and the optional 443 tunnel; it is not a SOCKS5 endpoint. The 443 tunnel does not use this NodePort.
 
 
 
 
 ---
 
-## 7. Open the Panel and Copy the Share Link
+## 7. Open the Panel and Copy a Share Link
 
 1. Open the panel URL from step 5.
 2. Sign in with **`ADMIN_PASSWORD`**.
 3. Confirm that the panel says **Relay is live**.
 4. Under **Access**, click **Reveal current password** if you need the raw credentials for manual client setup.
-5. The **v2rayN share link** box shows `socks://...@host:port#runflare` when `PUBLIC_SOCKS_ENDPOINT` is set. Click **Copy**; paste it into v2rayN with `Ctrl+V`.
+5. The **v2rayN share link** box shows `socks://...@host:port#runflare` when `PUBLIC_SOCKS_ENDPOINT` is set. Click **Copy** for the direct SOCKS5 path.
+6. The **v2rayN 443 tunnel** box shows a `vless://...@host:443...` link when the panel is open over HTTPS. Click **Copy** if your ISP throttles the SOCKS5 NodePort.
+
+> The 443 tunnel is **VLESS over WebSocket/TLS**, not SOCKS5. Import its link as a separate server in v2rayN. It uses the panel domain and the `/ws` path. If the card says `ws://` or the note warns that the panel is HTTP-only, attach a permanent HTTPS domain first; that link will not use port 443.
 
 ---
 
@@ -183,19 +195,34 @@ Runflare's default ClusterIP mapping is for the web panel. SOCKS5 is raw TCP, so
 
 ### Option A: v2rayN (GUI)
 
-The panel's **v2rayN share link** already contains the host, port, username, and password. Import it directly:
+The panel can generate two different links. Use the one that matches your network:
 
-1. Open the panel and click **Copy** next to the **v2rayN share link**.
+| Link | Protocol | Endpoint | When to use it |
+| --- | --- | --- | --- |
+| **v2rayN share link** | SOCKS5 | NodePort `host:5-digit-port` | Direct path; simplest setup |
+| **v2rayN 443 tunnel** | VLESS + WebSocket + TLS | Panel domain on port `443` | When the SOCKS5 NodePort is throttled |
+
+Import the link directly:
+
+1. Open the panel and click **Copy** next to the link you want.
 2. In v2rayN, choose **Servers → Import Share Links from Clipboard** (`Ctrl+V`).
-3. Select the imported `runflare` server in the server list.
+3. Select the imported server in the list: `runflare` for SOCKS5, or `runflare-443` for the tunnel.
 4. Click **Enable Tun** (run v2rayN as Administrator if prompted).
-5. Open **Routing Setting** and add rules for the traffic you want to send through the relay. Set the outbound to the imported `runflare` server, and add a final catch-all `direct` rule for everything else.
+5. Open **Routing Setting** and add rules for the traffic you want to send through the relay. Set the outbound to the imported server, and add a final catch-all `direct` rule for everything else.
 
-> The share link is a password. Anyone who has it can use the relay. If you prefer manual entry, use **Servers → Add [SOCKS]** and fill in the host, 5-digit port, username, and password from the panel.
+> The share link is a password. Anyone who has it can use the relay. If you prefer manual entry for the direct path, use **Servers → Add [SOCKS]** and fill in the host, 5-digit port, username, and password from the panel. Do not add the 443 tunnel as SOCKS5; it must be imported as VLESS.
 
 > v2rayN's TUN mode captures all system traffic. Configure the routing rules so only the traffic you want uses the relay.
 
+> If the 443 tunnel connects but pages do not load, turn off **Mux** for the `runflare-443` server. This relay handles one TCP stream per WebSocket; VLESS multiplexing is not implemented.
+
+> **Sing-box users:** [`client/sing-box.vless.example.json`](client/sing-box.vless.example.json) contains the same 443 tunnel as a VLESS/WebSocket/TLS outbound. Replace `PANEL_DOMAIN` and `VLESS_UUID` with the values from the panel.
+
 ---
+
+### How the 443 tunnel works
+
+The panel domain's HTTPS ingress forwards WebSocket upgrades to the container on port `3000`. The container speaks VLESS over WebSocket and relays TCP. Because the client connects to the domain on port `443` with TLS, the traffic uses the same port as normal HTTPS instead of the random NodePort. The SOCKS5 listener on `8000` remains unchanged.
 
 ### Confirm it is working
 
@@ -230,22 +257,28 @@ To avoid charges while you are not using the relay, stop the Runflare service.
 
 - **There is no panel URL, or Remote Access is empty.** ClusterIP is internal only. Create a temporary domain from the service list's **Domain** column, or attach your own domain in **Project → Domain Settings**. Make sure the domain points to `http:80 → 3000`, not the NodePort.
 - **The panel keeps returning to the sign-in page.** The domain is attached to the wrong network or the cookie is stale. Use the domain URL, not the NodePort, and confirm the ClusterIP target is `3000`.
-- **The temporary domain expired.** Create another one from the **Domain** column (3 per 24 hours). The SOCKS relay keeps working without the panel.
+- **The temporary domain expired.** Create another one from the **Domain** column (3 per 24 hours). The SOCKS relay keeps working without the panel. The 443 tunnel stops with the domain; use a permanent HTTPS domain for it.
 - **`curl` says the user was rejected.** The username or password is wrong. Use **Reveal current password** in the panel. Changes apply to new connections.
 - **`curl` cannot connect.** Confirm the NodePort is `Port 80 → Target 8000`, the service is running, and you are using the **Remote Access** `host:5-digit-port`, not port `8000`.
-- **Traffic is not going through the relay.** Confirm the client is using the NodePort `host:port`, the relay is live, and the app or system proxy is actually pointed at it. In v2rayN, check that the active routing rule selects the imported server. If you use TUN mode, run v2rayN as Administrator and check **Active connections** in the panel.
-- **The Route test shows 502 or HTTP 403.** Cloudflare is rejecting the container's test download. This is not the SOCKS proxy failing. Try `https://speed.hetzner.de/100MB.bin` in the Route test, or ignore it.
+- **The 443 tunnel link starts with `ws://`, or the panel says the domain is HTTP-only.** The tunnel needs HTTPS. Attach a permanent domain with TLS and open the panel over `https://`. A temporary Runflare domain may not provide TLS.
+- **The 443 tunnel link contains an internal hostname, `localhost`, or the wrong port.** The ingress rewrote the `Host` header. Set `PUBLIC_VLESS_ENDPOINT=https://your-domain:443` explicitly and redeploy; the panel will use that value for the tunnel link.
+- **The 443 tunnel link does not connect.** Confirm the domain opens the panel over HTTPS, the ClusterIP target is `3000`, and the domain/ingress forwards WebSocket upgrades for `/ws`. The tunnel is VLESS, not SOCKS5; import the `vless://` link, not the `socks://` link. If the ingress cannot upgrade WebSocket, the tunnel cannot work on that service.
+- **The 443 tunnel is also slow.** If the direct SOCKS5 NodePort is throttled but the 443 tunnel is slow too, the limit is likely the Runflare ingress/plan or the upstream route, not the ISP's high-port shaping. Compare it with the Route test and contact Runflare support or upgrade.
+- **The 443 tunnel link changed after changing `ADMIN_PASSWORD`.** Set a fixed `VLESS_UUID` environment variable and redeploy. The link is derived from the admin password when `VLESS_UUID` is empty.
+- **Traffic is not going through the relay.** Confirm the client is using the NodePort `host:port` or the imported 443 tunnel, the relay is live, and the app or system proxy is actually pointed at it. In v2rayN, check that the active routing rule selects the imported server. If you use TUN mode, run v2rayN as Administrator and check **Active connections** in the panel.
+- **The Route test shows 502 or HTTP 403.** Cloudflare is rejecting the container's test download. This is not the proxy failing. Try `https://speed.hetzner.de/100MB.bin` in the Route test, or ignore it.
 - **The password contains URL characters.** Use curl's `--proxy-user "USER:PASS"` instead of putting the password inside the proxy URL. Quote the value in your shell.
-- **The NodePort changed after a redeploy.** Update `PUBLIC_SOCKS_ENDPOINT` and the client config with the new `host:port`.
+- **The NodePort changed after a redeploy.** Update `PUBLIC_SOCKS_ENDPOINT` and the client config with the new `host:port`. The 443 tunnel does not depend on the NodePort; it depends on the panel domain.
 
 ---
 
 ## Limits & Notes
 
 - **No caching.** Every byte crosses the container twice: client → container, then container → destination. A 100 GB transfer moves roughly 200 GB through Runflare. Check Runflare's bandwidth quotas and pricing before large transfers.
-- **TCP only.** The relay implements SOCKS5 `CONNECT`, which forwards TCP. UDP-based traffic, including some voice, streaming, and QUIC flows, is not supported and may fail while routed.
+- **TCP only.** Both the SOCKS5 path and the 443 tunnel forward TCP. UDP-based traffic, including some voice, streaming, and QUIC flows, is not supported and may fail while routed.
+- **The 443 tunnel depends on the panel domain.** It uses the domain's HTTPS certificate and WebSocket support. A temporary domain expires after 1 hour; use a permanent domain for the tunnel. The SOCKS5 NodePort does not depend on the panel domain.
 - **In-memory state.** Panel changes, counters, and active sessions reset when the container restarts.
-- **Security.** The SOCKS port is public but requires a username and password. Use a strong password. The panel is protected by `ADMIN_PASSWORD`; use HTTPS for the domain when possible. A temporary domain may be HTTP-only, so avoid entering the admin password on an untrusted network.
+- **Security.** The SOCKS port is public but requires a username and password. The 443 tunnel is public but requires the VLESS UUID; treat the `vless://` link like a password. Use a strong `ADMIN_PASSWORD` and a fixed `VLESS_UUID`. The panel is protected by `ADMIN_PASSWORD`; use HTTPS for the domain. A temporary domain may be HTTP-only, so avoid entering the admin password on an untrusted network.
 - **Acceptable use.** A public general-purpose proxy may violate the host's terms. Check Runflare's policy before committing to large transfers.
 
 ---
@@ -263,7 +296,7 @@ $env:PROXY_PASS="testpass123"
 node server.js
 ```
 
-Open <http://127.0.0.1:3000>. To build the image:
+Open <http://127.0.0.1:3000>. The panel will show a local `ws://127.0.0.1:3000/ws` tunnel link; for a real 443 test, put the app behind an HTTPS domain or a local TLS terminator. To build the image:
 
 ```powershell
 docker build -t relay-control .

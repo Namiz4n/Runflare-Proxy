@@ -1,0 +1,52 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": ["172.19.0.1/30"],
+      "mtu": 1400,
+      "auto_route": true,
+      "strict_route": false,
+      "stack": "system"
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "relay-443",
+      "server": "PANEL_DOMAIN",
+      "server_port": 443,
+      "uuid": "VLESS_UUID",
+      "tls": {
+        "enabled": true,
+        "server_name": "PANEL_DOMAIN",
+        "alpn": ["http/1.1"]
+      },
+      "transport": {
+        "type": "ws",
+        "path": "/ws",
+        "headers": {
+          "Host": "PANEL_DOMAIN"
+        }
+      }
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "port": 53,
+        "outbound": "direct"
+      }
+    ],
+    "final": "relay-443",
+    "auto_detect_interface": true
+  }
+}

@@ -20,6 +20,11 @@ let speedBusy = false;
 let shareLink = '';
 let shareLinkLoaded = false;
 let shareLinkSeq = 0;
+let vlessLink = '';
+let vlessLinkLoaded = false;
+let vlessSecure = false;
+let vlessPort = 443;
+let vlessCopyTimer = null;
 
 async function api(path, options = {}) {
   const init = { credentials: 'same-origin', ...options };
@@ -183,23 +188,67 @@ function updateEndpoint(data = current) {
   note.textContent = 'Paste into v2rayN: Servers → Import Share Links from clipboard (Ctrl+V).';
 }
 
+function updateVless() {
+  const endpoint = $('vless-endpoint');
+  const copy = $('vless-copy');
+  const note = $('vless-note');
+  if (!endpoint) return;
+
+  if (!vlessLinkLoaded) {
+    endpoint.textContent = 'Generating tunnel link…';
+    endpoint.classList.add('is-placeholder');
+    copy.disabled = true;
+    note.textContent = 'The tunnel uses WebSocket on the panel domain, not the NodePort.';
+    return;
+  }
+
+  if (!vlessLink) {
+    endpoint.textContent = 'Tunnel link unavailable';
+    endpoint.classList.add('is-placeholder');
+    copy.disabled = true;
+    note.textContent = 'Reload the panel or check the server logs.';
+    return;
+  }
+
+  endpoint.textContent = vlessLink;
+  endpoint.classList.remove('is-placeholder');
+  copy.disabled = false;
+  note.textContent = vlessSecure
+    ? `TLS on port ${vlessPort} through the panel domain. Import into v2rayN with Ctrl+V.`
+    : `The panel is open over HTTP, so this link uses ws:// on port ${vlessPort} and not 443. Open the panel over HTTPS to get the wss:// link.`;
+}
+
 async function loadShareLink() {
   const sequence = ++shareLinkSeq;
   shareLinkLoaded = false;
-  if (current) updateEndpoint(current);
+  vlessLinkLoaded = false;
+  if (current) {
+    updateEndpoint(current);
+    updateVless();
+  }
 
   try {
     const secret = await api('/api/secret');
     if (sequence !== shareLinkSeq) return;
     shareLink = secret.link || '';
+    vlessLink = (secret.vless && secret.vless.link) || '';
+    vlessSecure = Boolean(secret.vless && secret.vless.secure);
+    vlessPort = Number(secret.vless && secret.vless.port) || 443;
   } catch (error) {
     if (error.message === 'Signed out') return;
     if (sequence !== shareLinkSeq) return;
     shareLink = '';
+    vlessLink = '';
+    vlessSecure = false;
+    vlessPort = 443;
   } finally {
     if (sequence === shareLinkSeq) {
       shareLinkLoaded = true;
-      if (current) updateEndpoint(current);
+      vlessLinkLoaded = true;
+      if (current) {
+        updateEndpoint(current);
+        updateVless();
+      }
     }
   }
 }
@@ -211,8 +260,8 @@ function render(data) {
 
   $('hero-title').textContent = data.enabled ? 'Relay is live' : 'Relay is paused';
   $('hero-note').textContent = data.enabled
-    ? `SOCKS5 is listening on port ${data.listen.port}. Point any SOCKS5-capable client at it.`
-    : 'The listener is still open, but it rejects every connection while paused.';
+    ? `SOCKS5 is listening on port ${data.listen.port}. The optional 443 tunnel uses the panel domain.`
+    : 'The listeners are still open, but every new connection is rejected while paused.';
   $('top-status').textContent = data.enabled ? 'Live' : 'Paused';
   $('status-pill').dataset.state = data.enabled ? 'live' : 'paused';
   $('lamp').className = `lamp ${data.enabled ? 'live' : 'paused'}`;
@@ -225,6 +274,7 @@ function render(data) {
   $('toggle-label').textContent = data.enabled ? 'Pause relay' : 'Resume relay';
 
   updateEndpoint(data);
+  updateVless();
 
   $('down').textContent = formatBytes(data.traffic.down);
   $('up').textContent = formatBytes(data.traffic.up);
@@ -276,7 +326,8 @@ function render(data) {
     Math.floor(now / 10000),
     data.active,
     ...data.connections.map(
-      (connection) => `${connection.id}:${connection.down}:${connection.up}:${connection.phase}`
+      (connection) =>
+        `${connection.id}:${connection.protocol}:${connection.down}:${connection.up}:${connection.phase}`
     ),
   ].join('|');
 
@@ -289,6 +340,7 @@ function render(data) {
       const row = document.createElement('tr');
       row.append(
         cell(connection.client),
+        cell(connection.protocol === 'vless' ? 'VLESS' : 'SOCKS5'),
         cell(connection.target || connection.phase, 'target'),
         cell(formatDuration((now - connection.started) / 1000)),
         cell(formatBytes(connection.down)),
@@ -403,6 +455,24 @@ $('copy').addEventListener('click', async () => {
   }
 });
 
+$('vless-copy').addEventListener('click', async () => {
+  if (!vlessLink) return;
+  const button = $('vless-copy');
+  try {
+    await copyText(vlessLink);
+    button.classList.add('is-copied');
+    $('vless-copy-label').textContent = 'Copied';
+    clearTimeout(vlessCopyTimer);
+    vlessCopyTimer = setTimeout(() => {
+      button.classList.remove('is-copied');
+      $('vless-copy-label').textContent = 'Copy';
+    }, 1800);
+    toast('443 tunnel link copied. Paste it into v2rayN.');
+  } catch {
+    toast('Copy failed. Select the link and copy it manually.', 'error');
+  }
+});
+
 $('cred-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const user = $('username').value.trim();
@@ -479,6 +549,13 @@ $('reveal').addEventListener('click', async () => {
       shareLink = secret.link;
       shareLinkLoaded = true;
       updateEndpoint(current);
+    }
+    if (secret.vless) {
+      vlessLink = secret.vless.link || '';
+      vlessSecure = Boolean(secret.vless.secure);
+      vlessPort = Number(secret.vless.port) || 443;
+      vlessLinkLoaded = true;
+      updateVless();
     }
     clearTimeout(revealTimer);
     revealTimer = setTimeout(() => {

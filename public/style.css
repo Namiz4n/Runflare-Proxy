@@ -488,6 +488,11 @@ dd {
   box-shadow: 0 0 8px var(--signal);
 }
 
+.chip-dot-data {
+  background: var(--data);
+  box-shadow: 0 0 8px var(--data);
+}
+
 .hero-actions {
   display: flex;
   flex-direction: column;
@@ -660,6 +665,15 @@ input:focus-visible,
   pointer-events: none;
 }
 
+.endpoint-card-tunnel {
+  margin-top: 12px;
+  border-left-color: var(--data);
+}
+
+.endpoint-card-tunnel::after {
+  background: linear-gradient(90deg, transparent, rgba(111, 214, 255, 0.04));
+}
+
 .endpoint-head {
   display: flex;
   align-items: flex-start;
@@ -682,6 +696,11 @@ input:focus-visible,
   border-radius: 50%;
   background: var(--signal);
   box-shadow: 0 0 10px var(--signal);
+}
+
+.label-dot-data {
+  background: var(--data);
+  box-shadow: 0 0 10px var(--data);
 }
 
 .endpoint-sub {
